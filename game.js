@@ -327,6 +327,9 @@ class PromtiGame {
     if (text.trim().length <= 3) {
       return { valid: false, msg: 'Промт должен содержать более 3 символов' };
     }
+    if (/[^\P{L}\p{Script=Cyrillic}]/u.test(text)) {
+      return { valid: false, msg: 'Через перевод объяснять нельзя' };
+    }
     if (this.promptSentThisLevel) {
       return { valid: false, msg: 'Промт уже был отправлен на этом уровне' };
     }
