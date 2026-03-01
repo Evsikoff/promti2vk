@@ -380,17 +380,17 @@ class PromtiGame {
         },
         body: JSON.stringify({
           model:       'deepseek-chat',
-          temperature: 1,
+          temperature: 0.5,
           messages: [
             {
               role: 'system',
               content:
                 'Ты участвуешь в игре «Объясни фразу». ' +
-                'Пользователь пытается объяснить тебе загаданную фразу на русском языке, ' +
-                'не используя однокоренные слова по отношению к словам, входящим в эту фразу. ' +
-                'Твоя задача — угадать загаданную фразу и написать её в ответе. ' +
-                'Важно: в своём ответе ты также не должен использовать однокоренные слова ' +
-                'к словам, которые пользователь употребил в своём запросе. ' +
+                'Пользователь описывает загаданное словосочетание, не используя слова с теми же корнями, что и в этой фразе. ' +
+                'Твоя задача — угадать фразу и обязательно написать её дословно и точно в своём ответе. ' +
+                'Угаданная фраза должна прозвучать в ответе явно, в той же форме, как она обычно используется. ' +
+                'Ответ должен быть кратким. ' +
+                'Важно: в своём ответе также не используй однокоренные слова к словам, которые пользователь употребил в своём запросе. ' +
                 'Отвечай на русском языке.'
             },
             { role: 'user', content: promptText.trim() }
@@ -425,10 +425,16 @@ class PromtiGame {
     return word.toLowerCase().replace(/ё/g, 'е');
   }
 
-  // Split phrase into words and check each one is present anywhere in the response (order-agnostic)
+  // Split phrase into words and check each one is present anywhere in the response (order-agnostic).
+  // Uses stem-based matching to handle Russian declensions (e.g. "торта" matches "торт").
   _checkPhraseInResponse(response) {
     const normResponse = this._normalizeWord(response);
-    return this._phraseWords().every(w => normResponse.includes(w));
+    return this._phraseWords().every(w => {
+      // For short words (≤4 chars) require exact match; for longer words use a stem (first 75%)
+      const stemLen = w.length <= 4 ? w.length : Math.floor(w.length * 0.75);
+      const stem = w.slice(0, stemLen);
+      return normResponse.includes(stem);
+    });
   }
 
   // Returns normalized individual words of the current phrase
