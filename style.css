@@ -662,6 +662,43 @@ img {
 .btn-energy-add:hover  { background: rgba(255,216,77,0.32); }
 .btn-energy-add:active { transform: scale(0.9); }
 
+/* "Акция" badge next to + button */
+.promo-badge {
+  background: #e53535;
+  color: #fff;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 10px;
+  white-space: nowrap;
+  animation: promoPulse 1.6s ease-in-out infinite;
+}
+@keyframes promoPulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.65; }
+}
+
+/* Discount badge on buy button */
+.btn-buy-wrapper {
+  position: relative;
+  width: 100%;
+}
+.discount-badge {
+  position: absolute;
+  top: -11px;
+  right: 12px;
+  background: #e53535;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 10px;
+  pointer-events: none;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+}
+
 /* ===== ENERGY MODAL ===== */
 .energy-modal {
   background: linear-gradient(160deg, #1a2a1a 0%, #0f1f2a 100%);
@@ -725,6 +762,8 @@ img {
   white-space: normal;
 }
 .energy-modal .btn:last-child { margin-bottom: 0; }
+.energy-modal .btn-buy-wrapper { width: 100%; margin-top: 10px; }
+.energy-modal .btn-buy-wrapper .btn { margin-bottom: 0; }
 
 /* ===== IAP OVERLAY ===== */
 .overlay {

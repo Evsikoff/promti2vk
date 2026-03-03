@@ -59,6 +59,7 @@
       <span class="stat-label">Энергия:</span>
       <span class="stat-value" id="stat-energy">0</span>
       <button class="btn-energy-add" id="btn-energy-add" title="Получить энергию">+</button>
+      <span class="promo-badge hidden" id="promo-badge">Акция</span>
     </div>
   </div>
 
@@ -148,7 +149,10 @@
     <div class="energy-modal-current">У вас <span id="modal-energy-value">0</span> ед.</div>
     <div class="energy-timer" id="energy-timer">—</div>
     <button class="btn btn-video" id="btn-energy-watch">Получить 5 единиц энергии 🎬</button>
-    <button class="btn btn-buy" id="btn-energy-buy">Купить 50 единиц энергии — 90 ₽</button>
+    <div class="btn-buy-wrapper">
+      <span class="discount-badge hidden" id="discount-badge"></span>
+      <button class="btn btn-buy" id="btn-energy-buy">Купить 50 единиц энергии — 90 ₽</button>
+    </div>
   </div>
 </div>
 

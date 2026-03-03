@@ -5,7 +5,9 @@ const DEEPSEEK_API_KEY = 'sk-9bd0908d76194c21bb304fe259a4e7fc';
 const DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';
 
 const ENERGY_IAP_ID          = 'energy_pack_50';
+const ENERGY_IAP_PROMO_ID    = 'energy_pack_50_promo';
 const ENERGY_IAP_AMOUNT      = 50;
+const ENERGY_IAP_PRICE       = 90; // base price in RUB
 const ENERGY_VIDEO_AMOUNT    = 5;
 const ENERGY_FIRST_GRANT     = 15;
 const ENERGY_FREE_AMOUNT     = 10;
@@ -33,6 +35,9 @@ class PromtiGame {
     this.lastFreeEnergyTime  = 0;    // timestamp of last free grant (0 = never)
     this.energyTimerInterval = null;
 
+    // Promotion state
+    this.activePromotion     = null;
+
     // UI selection state
     this.selectionMode       = false;
     this.selectedForbiddenId = null;
@@ -47,10 +52,12 @@ class PromtiGame {
     this._bindEvents();
 
     await this._initYandex();
+    await this._loadPromotion();
     this._loadProgress();
     this._initEnergy();
     this._loadLevel(this.currentLevelIndex);
     this._updateStatsPanel();
+    this._applyPromotionUI();
 
     // Notify Yandex that loading is complete
     this.ysdk?.features?.LoadingAPI?.ready();
@@ -94,6 +101,8 @@ class PromtiGame {
       btnEnergyClose:       $('btn-energy-close'),
       btnEnergyWatch:       $('btn-energy-watch'),
       btnEnergyBuy:         $('btn-energy-buy'),
+      promoBadge:           $('promo-badge'),
+      discountBadge:        $('discount-badge'),
     };
   }
 
@@ -149,6 +158,43 @@ class PromtiGame {
 
     } catch (e) {
       console.warn('[promti] Yandex SDK init failed:', e.message);
+    }
+  }
+
+  // ------------------------------------------------------------------ PROMOTIONS
+  async _loadPromotion() {
+    try {
+      const res = await fetch('promotions.json');
+      if (!res.ok) return;
+      const data = await res.json();
+      const now = new Date();
+      for (const promo of (data.promotions || [])) {
+        const [sd, sm, sy] = promo.start.split('.');
+        const [fd, fm, fy] = promo.finish.split('.');
+        const start  = new Date(+sy, +sm - 1, +sd, 0, 0, 0, 0);
+        const finish = new Date(+fy, +fm - 1, +fd, 23, 59, 59, 999);
+        if (now >= start && now <= finish) {
+          this.activePromotion = promo;
+          break;
+        }
+      }
+    } catch (e) {
+      console.warn('[promti] Could not load promotions.json:', e.message);
+    }
+  }
+
+  _applyPromotionUI() {
+    const promo = this.activePromotion;
+    if (promo) {
+      this.el.promoBadge.classList.remove('hidden');
+      const discounted = Math.round(ENERGY_IAP_PRICE * (1 - promo.discount / 100));
+      this.el.discountBadge.textContent = `-${promo.discount}%`;
+      this.el.discountBadge.classList.remove('hidden');
+      this.el.btnEnergyBuy.textContent = `Купить 50 единиц энергии — ${discounted} ₽`;
+    } else {
+      this.el.promoBadge.classList.add('hidden');
+      this.el.discountBadge.classList.add('hidden');
+      this.el.btnEnergyBuy.textContent = `Купить 50 единиц энергии — ${ENERGY_IAP_PRICE} ₽`;
     }
   }
 
@@ -642,7 +688,8 @@ class PromtiGame {
       return;
     }
     try {
-      await this.payments.purchase({ id: ENERGY_IAP_ID });
+      const iapId = this.activePromotion ? ENERGY_IAP_PROMO_ID : ENERGY_IAP_ID;
+      await this.payments.purchase({ id: iapId });
       this.energy += ENERGY_IAP_AMOUNT;
       this._saveProgress();
       this._updateStatsPanel();
