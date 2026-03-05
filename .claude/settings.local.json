@@ -9,7 +9,9 @@
       "Bash(sqlite3 promti.db \"SELECT COUNT\\(*\\) FROM phrases;\")",
       "Bash(sqlite3 promti.db \"SELECT id, phrase_id, root FROM forbidden_words WHERE phrase_id >= 81 ORDER BY phrase_id, id;\")",
       "Bash(sqlite3 promti.db \"SELECT id, phrase_id, root FROM forbidden_words ORDER BY phrase_id, id;\")",
-      "Bash(sqlite3 promti.db \"SELECT id, phrase_id, root FROM forbidden_words WHERE phrase_id IN \\(87,88,89,90,91,92,93,94,95,96\\) ORDER BY phrase_id, id;\")"
+      "Bash(sqlite3 promti.db \"SELECT id, phrase_id, root FROM forbidden_words WHERE phrase_id IN \\(87,88,89,90,91,92,93,94,95,96\\) ORDER BY phrase_id, id;\")",
+      "Bash(mkdir -p c:/Users/user/Documents/promti/libs)",
+      "Bash(curl -s \"https://cdn.jsdelivr.net/npm/marked@12/marked.min.js\" -o \"c:/Users/user/Documents/promti/libs/marked.min.js\")"
     ]
   }
 }
