@@ -35,6 +35,7 @@ class PromtiGame {
 
     // Progress
     this.completedPhrases    = {};   // { phraseId: true }
+    this.skippedPhrases      = {};   // { phraseId: true }
     this.totalCompleted      = 0;
     this.totalAttempts       = 0;
 
@@ -107,6 +108,7 @@ class PromtiGame {
       responseBox:            $('response-box'),
       resultBtns:             $('result-btns'),
       btnRetry:               $('btn-retry'),
+      btnSkip:                $('btn-skip'),
       btnNext:                $('btn-next-word'),
       statCompleted:          $('stat-completed'),
       statAttempts:           $('stat-attempts'),
@@ -132,6 +134,7 @@ class PromtiGame {
     el.promptTextarea.addEventListener('input', () => this._updateSendBtn());
     el.btnSend.addEventListener('click', () => this._sendPrompt());
     el.btnRetry.addEventListener('click', () => this._retryLevel());
+    el.btnSkip.addEventListener('click', () => this._skipWord());
     el.btnNext.addEventListener('click', () => this._nextWord());
     el.btnEnergyAdd.addEventListener('click', () => this._openEnergyModal());
     el.btnEnergyClose.addEventListener('click', () => this._closeEnergyModal());
@@ -251,6 +254,7 @@ class PromtiGame {
     this.energy             = data.energy             || 0;
     this.lastFreeEnergyTime = data.lastFreeEnergyTime || 0;
     this.completedPhrases   = data.completedPhrases   || {};
+    this.skippedPhrases     = data.skippedPhrases     || {};
 
     // Restore removed forbidden words
     const saved = data.removedForbidden || {};
@@ -266,6 +270,7 @@ class PromtiGame {
       energy:             this.energy,
       lastFreeEnergyTime: this.lastFreeEnergyTime,
       completedPhrases:   this.completedPhrases,
+      skippedPhrases:     this.skippedPhrases,
       removedForbidden: Object.fromEntries(
         Object.entries(this.removedForbidden).map(([k, s]) => [k, [...s]])
       )
@@ -350,9 +355,11 @@ class PromtiGame {
 
   _selectRandomPhrase(dictionaryId) {
     const dictPhrases = this.phrases.filter(p => p.dictionary_id === dictionaryId);
-    const uncompleted = dictPhrases.filter(p => !this.completedPhrases[p.id]);
-    if (uncompleted.length === 0) return null;
-    return uncompleted[Math.floor(Math.random() * uncompleted.length)];
+    const available = dictPhrases.filter(
+      p => !this.completedPhrases[p.id] && !this.skippedPhrases[p.id]
+    );
+    if (available.length === 0) return null;
+    return available[Math.floor(Math.random() * available.length)];
   }
 
   _goBack() {
@@ -402,6 +409,7 @@ class PromtiGame {
     // Reset action buttons
     this.el.resultBtns.classList.add('hidden');
     this.el.btnRetry.classList.add('hidden');
+    this.el.btnSkip.classList.add('hidden');
     this.el.btnNext.classList.add('hidden');
 
     // Reset selection buttons
@@ -707,14 +715,35 @@ class PromtiGame {
     this.el.resultBtns.classList.remove('hidden');
     if (phraseFound) {
       this.el.btnRetry.classList.add('hidden');
+      this.el.btnSkip.classList.add('hidden');
       this.el.btnNext.classList.remove('hidden');
     } else {
       this.el.btnRetry.classList.remove('hidden');
+      this.el.btnSkip.classList.remove('hidden');
       this.el.btnNext.classList.add('hidden');
     }
   }
 
-  // ------------------------------------------------------------------ RETRY / NEXT
+  // ------------------------------------------------------------------ RETRY / SKIP / NEXT
+  _skipWord() {
+    this._showRewardedVideo(
+      () => {
+        // Mark current phrase as skipped and save
+        this.skippedPhrases[this.currentPhrase.id] = true;
+        this._saveProgress();
+
+        // Load next available phrase from same dictionary
+        const nextPhrase = this._selectRandomPhrase(this.currentDictionaryId);
+        if (!nextPhrase) {
+          this._showDictionaryComplete();
+        } else {
+          this._loadPhrase(nextPhrase);
+        }
+      },
+      () => { /* video not watched — do nothing */ }
+    );
+  }
+
   _retryLevel() {
     this._showFullscreenAd(() => {
       this.promptSentThisLevel        = false;
@@ -722,6 +751,7 @@ class PromtiGame {
       this.el.responseBox.innerHTML   =
         '<span class="placeholder-text">Ответ нейросети появится здесь</span>';
       this.el.resultBtns.classList.add('hidden');
+      this.el.btnSkip.classList.add('hidden');
       this._updateSendBtn();
     });
   }
