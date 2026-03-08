@@ -24,6 +24,11 @@
     });
     document.addEventListener('dragstart', e => e.preventDefault());
 
+    // ── Forward wheel events to parent (VK page) so it can scroll ──
+    window.addEventListener('wheel', (e) => {
+      window.parent.postMessage({ type: 'wheel', deltaY: e.deltaY, deltaX: e.deltaX }, '*');
+    }, { passive: true });
+
     // ── Prevent pull-to-refresh on mobile (iOS Safari needs JS) ──
     let _touchStartY = 0;
     document.addEventListener('touchstart', e => {
