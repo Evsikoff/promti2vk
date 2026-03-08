@@ -16,7 +16,8 @@ const ENERGY_FREE_INTERVAL   = 10 * 60 * 60 * 1000; // 10 hours in ms
 // ===== GAME CLASS =====
 class PromtiGame {
   constructor() {
-    // VK Bridge — available as global vkBridge after SDK script loads
+    // VK Bridge reference (set in _initVK)
+    this._bridge       = null;
     this.vkBridgeReady = false;
 
     // Data loaded from JSON files
@@ -159,16 +160,24 @@ class PromtiGame {
 
   // ------------------------------------------------------------------ VK BRIDGE
   async _initVK() {
-    if (typeof vkBridge === 'undefined') {
+    // VK Bridge may be exposed under different globals depending on how it was loaded
+    const bridge = (typeof vkBridge !== 'undefined' && vkBridge)
+                || (typeof VKBridge  !== 'undefined' && VKBridge)
+                || null;
+
+    if (!bridge) {
       console.info('[promti] VK Bridge not found — running in dev mode.');
       return;
     }
+
+    // Store reference for later use
+    this._bridge = bridge;
 
     const VK_TIMEOUT = 5000; // ms
 
     try {
       const initData = await Promise.race([
-        vkBridge.send('VKWebAppInit'),
+        this._bridge.send('VKWebAppInit'),
         new Promise((_, reject) =>
           setTimeout(() => reject(new Error('VKWebAppInit timeout')), VK_TIMEOUT)
         )
@@ -213,13 +222,13 @@ class PromtiGame {
       chunks.push(str.slice(i, i + chunkSize));
     }
     // Store chunk count first
-    await vkBridge.send('VKWebAppStorageSet', {
+    await this._bridge.send('VKWebAppStorageSet', {
       key:   `${key}_cnt`,
       value: String(chunks.length)
     });
     // Store each chunk
     for (let i = 0; i < chunks.length; i++) {
-      await vkBridge.send('VKWebAppStorageSet', {
+      await this._bridge.send('VKWebAppStorageSet', {
         key:   `${key}_${i}`,
         value: chunks[i]
       });
@@ -228,7 +237,7 @@ class PromtiGame {
 
   // Loads and reassembles chunked JSON value from VK Storage.
   async _loadFromVKStorage(key) {
-    const cntRes   = await vkBridge.send('VKWebAppStorageGet', { keys: [`${key}_cnt`] });
+    const cntRes   = await this._bridge.send('VKWebAppStorageGet', { keys: [`${key}_cnt`] });
     const cntEntry = cntRes.keys.find(k => k.key === `${key}_cnt`);
     if (!cntEntry || !cntEntry.value) return null;
 
@@ -236,7 +245,7 @@ class PromtiGame {
     if (!n || n < 1) return null;
 
     const chunkKeys  = Array.from({ length: n }, (_, i) => `${key}_${i}`);
-    const chunksRes  = await vkBridge.send('VKWebAppStorageGet', { keys: chunkKeys });
+    const chunksRes  = await this._bridge.send('VKWebAppStorageGet', { keys: chunkKeys });
     const str = chunkKeys
       .map(k => {
         const entry = chunksRes.keys.find(e => e.key === k);
@@ -893,7 +902,7 @@ class PromtiGame {
     }
     try {
       const iapId = this.activePromotion ? ENERGY_IAP_PROMO_ID : ENERGY_IAP_ID;
-      const data = await vkBridge.send('VKWebAppShowOrderBox', {
+      const data = await this._bridge.send('VKWebAppShowOrderBox', {
         type: 'item',
         item: iapId
       });
@@ -920,7 +929,7 @@ class PromtiGame {
     }
     try {
       // Check if rewarded ad is available (triggers preload if not)
-      const checkData = await vkBridge.send('VKWebAppCheckNativeAds', {
+      const checkData = await this._bridge.send('VKWebAppCheckNativeAds', {
         ad_format: 'reward'
       });
       if (!checkData.result) {
@@ -929,7 +938,7 @@ class PromtiGame {
         return;
       }
       // Show rewarded ad
-      const showData = await vkBridge.send('VKWebAppShowNativeAds', {
+      const showData = await this._bridge.send('VKWebAppShowNativeAds', {
         ad_format: 'reward'
       });
       if (showData.result) {
@@ -950,7 +959,7 @@ class PromtiGame {
       return;
     }
     try {
-      await vkBridge.send('VKWebAppShowNativeAds', {
+      await this._bridge.send('VKWebAppShowNativeAds', {
         ad_format: 'interstitial'
       });
     } catch (e) {
