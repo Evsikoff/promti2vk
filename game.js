@@ -20,6 +20,9 @@ class PromtiGame {
     this._bridge       = null;
     this.vkBridgeReady = false;
 
+    // Platform: null (web/dev), 'vk', or 'ok'
+    this.platform      = null;
+
     // Data loaded from JSON files
     this.phrases       = [];  // from phrases.json
     this.forbiddenWords = []; // from forbidden_words.json
@@ -66,6 +69,9 @@ class PromtiGame {
 
     // Load from localStorage first (fast path for returning users)
     this._loadProgress();
+
+    // Detect Odnoklassniki platform before VK init
+    this._detectOK();
 
     // Init VK Bridge and load VK Storage (overrides localStorage).
     // Race with a timeout so a non-responsive bridge never blocks the game.
@@ -159,6 +165,15 @@ class PromtiGame {
     }
   }
 
+  // ------------------------------------------------------------------ OK PLATFORM
+  _detectOK() {
+    // Odnoklassniki exposes FAPI as a global object
+    if (typeof FAPI !== 'undefined' && FAPI) {
+      this.platform = 'ok';
+      console.info('[promti] Odnoklassniki platform detected');
+    }
+  }
+
   // ------------------------------------------------------------------ VK BRIDGE
   async _initVK() {
     // VK Bridge may be exposed under different globals depending on how it was loaded
@@ -197,6 +212,7 @@ class PromtiGame {
       ]);
       if (initData.result) {
         this.vkBridgeReady = true;
+        this.platform = 'vk';
         console.info('[promti] VK Bridge initialized');
       } else {
         console.warn('[promti] VK Bridge init returned false');
@@ -297,6 +313,37 @@ class PromtiGame {
 
   _applyPromotionUI() {
     const promo = this.activePromotion;
+
+    // On social platforms show price in platform currency instead of rubles
+    if (this.platform === 'vk') {
+      const label = promo ? '4 голоса' : '8 голосов';
+      if (promo) {
+        this.el.promoBadge.classList.remove('hidden');
+        this.el.discountBadge.textContent = `-${promo.discount}%`;
+        this.el.discountBadge.classList.remove('hidden');
+      } else {
+        this.el.promoBadge.classList.add('hidden');
+        this.el.discountBadge.classList.add('hidden');
+      }
+      this.el.btnEnergyBuy.textContent = `Купить 100 единиц энергии — ${label}`;
+      return;
+    }
+
+    if (this.platform === 'ok') {
+      const label = promo ? '4 ОКов' : '8 ОКов';
+      if (promo) {
+        this.el.promoBadge.classList.remove('hidden');
+        this.el.discountBadge.textContent = `-${promo.discount}%`;
+        this.el.discountBadge.classList.remove('hidden');
+      } else {
+        this.el.promoBadge.classList.add('hidden');
+        this.el.discountBadge.classList.add('hidden');
+      }
+      this.el.btnEnergyBuy.textContent = `Купить 100 единиц энергии — ${label}`;
+      return;
+    }
+
+    // Default: show price in rubles
     if (promo) {
       this.el.promoBadge.classList.remove('hidden');
       const discounted = Math.round(ENERGY_IAP_PRICE * (1 - promo.discount / 100));
