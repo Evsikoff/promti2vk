@@ -174,6 +174,18 @@ class PromtiGame {
     // Store reference for later use
     this._bridge = bridge;
 
+    // Subscribe BEFORE sending VKWebAppInit so we never miss VKWebAppUpdateConfig.
+    // VK sends that event as a direct response to VKWebAppInit (can arrive before
+    // the init promise resolves), so the subscription must be in place first.
+    this._bridge.subscribe((e) => {
+      if (e.detail.type === 'VKWebAppUpdateConfig') {
+        const h = e.detail.data.viewport_height;
+        if (h && h > 0) {
+          this.el.appContainer.style.height = h + 'px';
+        }
+      }
+    });
+
     const VK_TIMEOUT = 5000; // ms
 
     try {
@@ -195,17 +207,10 @@ class PromtiGame {
       return;
     }
 
-    // Subscribe to VKWebAppUpdateConfig to get the real visible viewport height.
-    // VK's iframe can be larger than the browser viewport, so we must use
-    // viewport_height from VK Bridge rather than css 100vh.
-    this._bridge.subscribe((e) => {
-      if (e.detail.type === 'VKWebAppUpdateConfig') {
-        const h = e.detail.data.viewport_height;
-        if (h && h > 0) {
-          this.el.appContainer.style.height = h + 'px';
-        }
-      }
-    });
+    // Give VK a moment to deliver VKWebAppUpdateConfig (it fires asynchronously
+    // right after VKWebAppInit is processed). Without this pause the container
+    // height could be set after the loading overlay is already hidden.
+    await new Promise(resolve => setTimeout(resolve, 150));
 
     // Load progress from VK Storage (primary source — overrides localStorage)
     try {
