@@ -733,7 +733,7 @@ img {
   position: relative;
   box-shadow: 0 0 0 3px rgba(255,216,77,0.15), 0 24px 48px rgba(0,0,0,0.7);
   animation: popIn 0.3s cubic-bezier(0.34,1.56,0.64,1);
-  max-height: 90dvh;
+  max-height: calc(100dvh - 32px);
   overflow-y: auto;
   box-sizing: border-box;
 }
@@ -816,9 +816,8 @@ img {
   justify-content: center;
   z-index: 1000;
   backdrop-filter: blur(3px);
-  padding: 12px;
+  padding: 16px;
   box-sizing: border-box;
-  overflow-y: auto;
 }
 
 .iap-modal {
