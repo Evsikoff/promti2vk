@@ -16,10 +16,8 @@ const ENERGY_FREE_INTERVAL   = 10 * 60 * 60 * 1000; // 10 hours in ms
 // ===== GAME CLASS =====
 class PromtiGame {
   constructor() {
-    // Yandex SDK objects
-    this.ysdk     = null;
-    this.player   = null;
-    this.payments = null;
+    // VK Bridge — available as global vkBridge after SDK script loads
+    this.vkBridgeReady = false;
 
     // Data loaded from JSON files
     this.phrases       = [];  // from phrases.json
@@ -61,26 +59,23 @@ class PromtiGame {
     this._bindEvents();
 
     await Promise.all([
-      this._initYandex(),
-      this._loadData()
+      this._loadData(),
+      this._loadPromotion()
     ]);
-    await this._loadPromotion();
+
+    // Load from localStorage first (fast path for returning users)
     this._loadProgress();
+
+    // Init VK Bridge and load VK Storage (overrides localStorage).
+    // Race with a timeout so a non-responsive bridge never blocks the game.
+    await Promise.race([
+      this._initVK(),
+      new Promise(resolve => setTimeout(resolve, 8000))
+    ]);
+
     this._initEnergy();
     this._updateStatsPanel();
     this._applyPromotionUI();
-
-    // Notify Yandex that loading is complete
-    this.ysdk?.features?.LoadingAPI?.ready();
-
-    // Start tracking gameplay
-    this._gameplayStart();
-
-    // Log interface language (for future localisation)
-    if (this.ysdk) {
-      const lang = this.ysdk.environment.i18n.lang;
-      console.info('[promti] i18n.lang:', lang);
-    }
 
     // Show start screen
     this._showStartScreen();
@@ -162,44 +157,93 @@ class PromtiGame {
     }
   }
 
-  // ------------------------------------------------------------------ YANDEX
-  async _initYandex() {
-    if (typeof YaGames === 'undefined') {
-      console.info('[promti] YaGames SDK not found — running in dev mode.');
+  // ------------------------------------------------------------------ VK BRIDGE
+  async _initVK() {
+    if (typeof vkBridge === 'undefined') {
+      console.info('[promti] VK Bridge not found — running in dev mode.');
       return;
     }
+
+    const VK_TIMEOUT = 5000; // ms
+
     try {
-      this.ysdk   = await YaGames.init();
-      this.player = await this.ysdk.getPlayer({ scopes: false });
-
-      // Load cloud save
-      try {
-        const cloudData = await this.player.getData(['progress']);
-        if (cloudData && cloudData.progress) {
-          this._applyProgressData(cloudData.progress);
-        }
-      } catch (e) { /* cloud data might be empty on first run */ }
-
-      // Init payments
-      try {
-        this.payments = await this.ysdk.getPayments({ signed: true });
-        // Consume any unprocessed purchases (e.g. after network failure)
-        const pending = await this.payments.getPurchases();
-        for (const purchase of pending) {
-          if (purchase.productID === ENERGY_IAP_ID) {
-            this.energy += ENERGY_IAP_AMOUNT;
-            this._saveProgress();
-            await this.payments.consumePurchase(purchase.purchaseToken);
-          }
-        }
-        if (pending.length) this._updateStatsPanel();
-      } catch (e) {
-        console.warn('[promti] Payments unavailable:', e.message);
+      const initData = await Promise.race([
+        vkBridge.send('VKWebAppInit'),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('VKWebAppInit timeout')), VK_TIMEOUT)
+        )
+      ]);
+      if (initData.result) {
+        this.vkBridgeReady = true;
+        console.info('[promti] VK Bridge initialized');
+      } else {
+        console.warn('[promti] VK Bridge init returned false');
+        return;
       }
-
     } catch (e) {
-      console.warn('[promti] Yandex SDK init failed:', e.message);
+      console.warn('[promti] VK Bridge init failed:', e.message);
+      return;
     }
+
+    // Load progress from VK Storage (primary source — overrides localStorage)
+    try {
+      const vkData = await Promise.race([
+        this._loadFromVKStorage('promti'),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('VK Storage load timeout')), VK_TIMEOUT)
+        )
+      ]);
+      if (vkData) {
+        this._applyProgressData(vkData);
+        console.info('[promti] Progress loaded from VK Storage');
+      }
+    } catch (e) {
+      console.warn('[promti] VK Storage load failed:', e.message);
+    }
+  }
+
+  // ------------------------------------------------------------------ VK STORAGE HELPERS
+  // Saves arbitrary JSON value to VK Storage under the given key,
+  // splitting into 4000-char chunks automatically.
+  async _saveToVKStorage(key, value) {
+    const str = JSON.stringify(value);
+    const chunkSize = 4000;
+    const chunks = [];
+    for (let i = 0; i < str.length; i += chunkSize) {
+      chunks.push(str.slice(i, i + chunkSize));
+    }
+    // Store chunk count first
+    await vkBridge.send('VKWebAppStorageSet', {
+      key:   `${key}_cnt`,
+      value: String(chunks.length)
+    });
+    // Store each chunk
+    for (let i = 0; i < chunks.length; i++) {
+      await vkBridge.send('VKWebAppStorageSet', {
+        key:   `${key}_${i}`,
+        value: chunks[i]
+      });
+    }
+  }
+
+  // Loads and reassembles chunked JSON value from VK Storage.
+  async _loadFromVKStorage(key) {
+    const cntRes   = await vkBridge.send('VKWebAppStorageGet', { keys: [`${key}_cnt`] });
+    const cntEntry = cntRes.keys.find(k => k.key === `${key}_cnt`);
+    if (!cntEntry || !cntEntry.value) return null;
+
+    const n = parseInt(cntEntry.value, 10);
+    if (!n || n < 1) return null;
+
+    const chunkKeys  = Array.from({ length: n }, (_, i) => `${key}_${i}`);
+    const chunksRes  = await vkBridge.send('VKWebAppStorageGet', { keys: chunkKeys });
+    const str = chunkKeys
+      .map(k => {
+        const entry = chunksRes.keys.find(e => e.key === k);
+        return entry ? entry.value : '';
+      })
+      .join('');
+    return JSON.parse(str);
   }
 
   // ------------------------------------------------------------------ PROMOTIONS
@@ -276,13 +320,17 @@ class PromtiGame {
       )
     };
 
-    // Local storage
-    localStorage.setItem('promti_progress', JSON.stringify(data));
+    // VK Storage (primary)
+    if (this.vkBridgeReady) {
+      this._saveToVKStorage('promti', data)
+        .catch(e => console.warn('[promti] VK Storage save failed:', e));
+    }
 
-    // Yandex cloud
-    if (this.player) {
-      this.player.setData({ progress: data })
-        .catch(e => console.warn('[promti] Cloud save failed:', e.message));
+    // Local storage (fallback)
+    try {
+      localStorage.setItem('promti_progress', JSON.stringify(data));
+    } catch (e) {
+      console.warn('[promti] localStorage save failed:', e);
     }
   }
 
@@ -835,7 +883,7 @@ class PromtiGame {
   }
 
   async _handleEnergyPurchase() {
-    if (!this.payments) {
+    if (!this.vkBridgeReady) {
       // Dev mode: grant instantly
       this.energy += ENERGY_IAP_AMOUNT;
       this._saveProgress();
@@ -845,75 +893,71 @@ class PromtiGame {
     }
     try {
       const iapId = this.activePromotion ? ENERGY_IAP_PROMO_ID : ENERGY_IAP_ID;
-      await this.payments.purchase({ id: iapId });
-      this.energy += ENERGY_IAP_AMOUNT;
-      this._saveProgress();
-      this._updateStatsPanel();
-      this.el.modalEnergyValue.textContent = this.energy;
+      const data = await vkBridge.send('VKWebAppShowOrderBox', {
+        type: 'item',
+        item: iapId
+      });
+      if (data.success) {
+        this.energy += ENERGY_IAP_AMOUNT;
+        this._saveProgress();
+        this._updateStatsPanel();
+        this.el.modalEnergyValue.textContent = this.energy;
+      }
     } catch (e) {
-      if (e.code !== 'UserCanceled') {
-        console.error('[promti] Energy purchase error:', e);
+      console.error('[promti] Energy purchase error:', e);
+      if (e?.error_data?.error_reason !== 'User closed payment dialog') {
         alert('Ошибка покупки. Попробуйте позже.');
       }
     }
   }
 
-  // ------------------------------------------------------------------ GAMEPLAY API
-  _gameplayStart() {
-    this.ysdk?.features?.GameplayAPI?.start?.();
-  }
-
-  _gameplayStop() {
-    this.ysdk?.features?.GameplayAPI?.stop?.();
-  }
-
   // ------------------------------------------------------------------ ADS
-  _showRewardedVideo(onReward, onNoReward) {
-    if (!this.ysdk) {
+  async _showRewardedVideo(onReward, onNoReward) {
+    if (!this.vkBridgeReady) {
       // Dev mode: always reward
       if (onReward) onReward();
       return;
     }
-
-    this._gameplayStop();
-    let rewarded = false;
-    this.ysdk.adv.showRewardedVideo({
-      callbacks: {
-        onRewarded: () => { rewarded = true; },
-        onClose: () => {
-          this._gameplayStart();
-          (rewarded ? onReward : onNoReward)?.();
-        },
-        onError: (e) => {
-          console.warn('[promti] Rewarded ad error:', e);
-          this._gameplayStart();
-          if (onReward) onReward(); // graceful fallback
-        }
+    try {
+      // Check if rewarded ad is available (triggers preload if not)
+      const checkData = await vkBridge.send('VKWebAppCheckNativeAds', {
+        ad_format: 'reward'
+      });
+      if (!checkData.result) {
+        console.warn('[promti] No rewarded ad available');
+        if (onNoReward) onNoReward();
+        return;
       }
-    });
+      // Show rewarded ad
+      const showData = await vkBridge.send('VKWebAppShowNativeAds', {
+        ad_format: 'reward'
+      });
+      if (showData.result) {
+        if (onReward) onReward();
+      } else {
+        if (onNoReward) onNoReward();
+      }
+    } catch (e) {
+      console.warn('[promti] Rewarded ad error:', e);
+      // Graceful fallback: grant reward so user is not blocked
+      if (onReward) onReward();
+    }
   }
 
-  _showFullscreenAd(callback) {
-    if (!this.ysdk) {
+  async _showFullscreenAd(callback) {
+    if (!this.vkBridgeReady) {
       if (callback) callback();
       return;
     }
-
-    this._gameplayStop();
-    let called = false;
-    this.ysdk.adv.showFullscreenAdv({
-      callbacks: {
-        onClose: (_wasShown) => {
-          this._gameplayStart();
-          if (!called) { called = true; callback?.(); }
-        },
-        onError: (e) => {
-          console.warn('[promti] Fullscreen ad error:', e);
-          this._gameplayStart();
-          if (!called) { called = true; callback?.(); }
-        }
-      }
-    });
+    try {
+      await vkBridge.send('VKWebAppShowNativeAds', {
+        ad_format: 'interstitial'
+      });
+    } catch (e) {
+      console.warn('[promti] Interstitial ad error:', e);
+    } finally {
+      if (callback) callback();
+    }
   }
 
   // ------------------------------------------------------------------ DICTIONARY COMPLETE
