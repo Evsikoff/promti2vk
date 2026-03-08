@@ -111,8 +111,10 @@ img {
 #app-container {
   width: 100%;
   max-width: 680px;
-  /* Fill the full viewport height and scroll internally.
-     This makes scroll work even when VK sets overflow:hidden on the iframe. */
+  /* Height is set by JS from VKWebAppUpdateConfig.viewport_height — the real
+     visible browser viewport — so scrolling inside the container always works
+     regardless of how tall VK makes the iframe.
+     Fallback 100vh is overridden as soon as VK sends the first config event. */
   height: 100vh;
   overflow-y: auto;
   overflow-x: hidden;

@@ -88,6 +88,7 @@ class PromtiGame {
   _cacheElements() {
     const $ = id => document.getElementById(id);
     this.el = {
+      appContainer:           $('app-container'),
       loadingOverlay:         $('loading-overlay'),
       startScreen:            $('start-screen'),
       gameContainer:          $('game-container'),
@@ -193,6 +194,18 @@ class PromtiGame {
       console.warn('[promti] VK Bridge init failed:', e.message);
       return;
     }
+
+    // Subscribe to VKWebAppUpdateConfig to get the real visible viewport height.
+    // VK's iframe can be larger than the browser viewport, so we must use
+    // viewport_height from VK Bridge rather than css 100vh.
+    this._bridge.subscribe((e) => {
+      if (e.detail.type === 'VKWebAppUpdateConfig') {
+        const h = e.detail.data.viewport_height;
+        if (h && h > 0) {
+          this.el.appContainer.style.height = h + 'px';
+        }
+      }
+    });
 
     // Load progress from VK Storage (primary source — overrides localStorage)
     try {
