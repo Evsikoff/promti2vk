@@ -4,9 +4,9 @@
 const DEEPSEEK_API_KEY = 'sk-9bd0908d76194c21bb304fe259a4e7fc';
 const DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';
 
-const ENERGY_IAP_ID          = 'energy_pack_50';
-const ENERGY_IAP_PROMO_ID    = 'energy_pack_50_promo';
-const ENERGY_IAP_AMOUNT      = 50;
+const ENERGY_IAP_ID          = 'energy_pack_100';
+const ENERGY_IAP_PROMO_ID    = 'energy_pack_100_promo';
+const ENERGY_IAP_AMOUNT      = 100;
 const ENERGY_IAP_PRICE       = 90; // base price in RUB
 const ENERGY_VIDEO_AMOUNT    = 5;
 const ENERGY_FIRST_GRANT     = 15;
@@ -302,11 +302,11 @@ class PromtiGame {
       const discounted = Math.round(ENERGY_IAP_PRICE * (1 - promo.discount / 100));
       this.el.discountBadge.textContent = `-${promo.discount}%`;
       this.el.discountBadge.classList.remove('hidden');
-      this.el.btnEnergyBuy.textContent = `Купить 50 единиц энергии — ${discounted} ₽`;
+      this.el.btnEnergyBuy.textContent = `Купить 100 единиц энергии — ${discounted} ₽`;
     } else {
       this.el.promoBadge.classList.add('hidden');
       this.el.discountBadge.classList.add('hidden');
-      this.el.btnEnergyBuy.textContent = `Купить 50 единиц энергии — ${ENERGY_IAP_PRICE} ₽`;
+      this.el.btnEnergyBuy.textContent = `Купить 100 единиц энергии — ${ENERGY_IAP_PRICE} ₽`;
     }
   }
 
