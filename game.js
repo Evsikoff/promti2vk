@@ -169,16 +169,18 @@ class PromtiGame {
   // ------------------------------------------------------------------ PLATFORM DETECTION
   _detectPlatform() {
     const params = new URLSearchParams(window.location.search);
-    // Odnoklassniki passes application_key (and often api_server) in query string
-    if (params.has('application_key') || params.has('api_server')) {
+    // Odnoklassniki: vk_client=ok OR vk_platform ends with _ok OR vk_ok_app_id present
+    const vkClient   = params.get('vk_client')  || '';
+    const vkPlatform = params.get('vk_platform') || '';
+    if (vkClient === 'ok' || vkPlatform.endsWith('_ok') || params.has('vk_ok_app_id')) {
       this.platform = 'ok';
-      console.info('[promti] Odnoklassniki platform detected (URL params)');
+      console.info('[promti] Odnoklassniki platform detected');
       return;
     }
-    // VK passes vk_app_id (and other vk_* params) in query string
-    if (params.has('vk_app_id') || [...params.keys()].some(k => k.startsWith('vk_'))) {
+    // VK: any vk_* param present
+    if ([...params.keys()].some(k => k.startsWith('vk_'))) {
       this.platform = 'vk';
-      console.info('[promti] VK platform detected (URL params)');
+      console.info('[promti] VK platform detected');
     }
   }
 
