@@ -70,15 +70,16 @@ class PromtiGame {
     // Load from localStorage first (fast path for returning users)
     this._loadProgress();
 
-    // Detect Odnoklassniki platform before VK init
-    this._detectOK();
+    // Detect platform via URL params (most reliable signal)
+    this._detectPlatform();
 
-    // Init VK Bridge and load VK Storage (overrides localStorage).
-    // Race with a timeout so a non-responsive bridge never blocks the game.
-    await Promise.race([
-      this._initVK(),
-      new Promise(resolve => setTimeout(resolve, 8000))
-    ]);
+    // Init VK Bridge only when running in VK (or dev mode — platform not yet known)
+    if (this.platform !== 'ok') {
+      await Promise.race([
+        this._initVK(),
+        new Promise(resolve => setTimeout(resolve, 8000))
+      ]);
+    }
 
     this._initEnergy();
     this._updateStatsPanel();
@@ -165,12 +166,19 @@ class PromtiGame {
     }
   }
 
-  // ------------------------------------------------------------------ OK PLATFORM
-  _detectOK() {
-    // Odnoklassniki exposes FAPI as a global object
-    if (typeof FAPI !== 'undefined' && FAPI) {
+  // ------------------------------------------------------------------ PLATFORM DETECTION
+  _detectPlatform() {
+    const params = new URLSearchParams(window.location.search);
+    // Odnoklassniki passes application_key (and often api_server) in query string
+    if (params.has('application_key') || params.has('api_server')) {
       this.platform = 'ok';
-      console.info('[promti] Odnoklassniki platform detected');
+      console.info('[promti] Odnoklassniki platform detected (URL params)');
+      return;
+    }
+    // VK passes vk_app_id (and other vk_* params) in query string
+    if (params.has('vk_app_id') || [...params.keys()].some(k => k.startsWith('vk_'))) {
+      this.platform = 'vk';
+      console.info('[promti] VK platform detected (URL params)');
     }
   }
 
@@ -212,7 +220,7 @@ class PromtiGame {
       ]);
       if (initData.result) {
         this.vkBridgeReady = true;
-        this.platform = 'vk';
+        if (this.platform !== 'ok') this.platform = 'vk';
         console.info('[promti] VK Bridge initialized');
       } else {
         console.warn('[promti] VK Bridge init returned false');
