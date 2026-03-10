@@ -29,17 +29,7 @@
       window.parent.postMessage({ type: 'wheel', deltaY: e.deltaY, deltaX: e.deltaX }, '*');
     }, { passive: true });
 
-    // ── Prevent pull-to-refresh on mobile (iOS Safari needs JS) ──
-    let _touchStartY = 0;
-    document.addEventListener('touchstart', e => {
-      _touchStartY = e.touches[0].clientY;
-    }, { passive: true });
-    document.addEventListener('touchmove', e => {
-      const dy = e.touches[0].clientY - _touchStartY;
-      if (dy > 0 && (window.scrollY === 0 || document.documentElement.scrollTop === 0)) {
-        e.preventDefault();
-      }
-    }, { passive: false });
+    // Pull-to-refresh is blocked via CSS overscroll-behavior:contain on #app-container.
   </script>
 </head>
 <body>
