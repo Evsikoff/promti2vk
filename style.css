@@ -1006,3 +1006,40 @@ img {
     padding: 14px 14px 18px;
   }
 }
+
+/* ===== PORTRAIT MOBILE: compact stats panel ===== */
+/* Triggered when the device is narrow AND in portrait orientation —
+   exactly the scenario where the Акция badge makes the row overflow. */
+@media (max-width: 540px) and (orientation: portrait) {
+  .stats-panel {
+    flex-wrap: wrap;
+    gap: 4px 24px;
+    padding: 8px 14px;
+    justify-content: space-around;
+  }
+
+  /* "Объяснено" and "Попытки" share the first row;
+     "Энергия" (which can carry the wide Акция badge) gets its own row. */
+  .stat-item-energy {
+    width: 100%;
+    justify-content: center;
+    gap: 7px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    margin-top: 2px;
+  }
+
+  .stat-label { font-size: 0.72rem; }
+  .stat-value  { font-size: 0.9rem; min-width: 14px; }
+
+  .btn-energy-add {
+    width: 22px;
+    height: 22px;
+    font-size: 0.95rem;
+  }
+
+  .promo-badge {
+    font-size: 0.55rem;
+    padding: 2px 5px;
+  }
+}
