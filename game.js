@@ -180,7 +180,15 @@ class PromtiGame {
     // Odnoklassniki: vk_client=ok OR vk_platform ends with _ok OR vk_ok_app_id present
     const vkClient   = params.get('vk_client')  || '';
     const vkPlatform = params.get('vk_platform') || '';
-    if (vkClient === 'ok' || vkPlatform.endsWith('_ok') || params.has('vk_ok_app_id')) {
+    const apiServer  = params.get('api_server') || '';
+
+    if (
+      vkClient === 'ok' ||
+      vkPlatform.endsWith('_ok') ||
+      params.has('vk_ok_app_id') ||
+      apiServer.includes('ok.ru') ||
+      (typeof FAPI !== 'undefined')
+    ) {
       this.platform = 'ok';
       console.info('[promti] Odnoklassniki platform detected');
       return;
@@ -266,15 +274,25 @@ class PromtiGame {
   // ------------------------------------------------------------------ OK SDK
   _initOK() {
     return new Promise((resolve) => {
+      // 1. Check for FAPI (standard OK SDK used in iframes)
+      if (typeof FAPI !== 'undefined') {
+        this.okReady = true;
+        this._setupOKCallbacks();
+        console.info('[promti] FAPI (OK SDK) initialized');
+        resolve();
+        return;
+      }
+
+      // 2. Fallback to OKSDK (for external sites or if FAPI not pre-loaded)
       const params = new URLSearchParams(window.location.search);
-      const appId     = params.get('application_id') || '';
-      const sessKey   = params.get('session_secret_key') || params.get('auth_sig') || '';
+      const appId     = params.get('application_id') || params.get('api_id') || '';
+      const sessKey   = params.get('session_secret_key') || params.get('auth_sig') || params.get('session_key') || '';
       const apiServer = params.get('api_server') || '';
 
       const tryInit = () => {
         const sdk = (typeof OKSDK !== 'undefined' && OKSDK) || null;
         if (!sdk) {
-          console.info('[promti] OKSDK not found — dev mode on OK.');
+          console.info('[promti] OKSDK not found — checking FAPI again or dev mode.');
           resolve();
           return;
         }
@@ -284,6 +302,7 @@ class PromtiGame {
           api_server         : apiServer,
         }, () => {
           this.okReady = true;
+          this._setupOKCallbacks();
           console.info('[promti] OKSDK initialized');
           resolve();
         }, (err) => {
@@ -305,6 +324,34 @@ class PromtiGame {
         document.head.appendChild(script);
       }
     });
+  }
+
+  // FAPI uses a global API_callback function to return results
+  _setupOKCallbacks() {
+    window.API_callback = (method, result, data) => {
+      console.info('[promti] OK API_callback:', method, result, data);
+
+      if (method === 'showPayment') {
+        if (result === 'ok') {
+          // Dispatched via custom events or handled directly
+          window.dispatchEvent(new CustomEvent('ok-payment-success', { detail: data }));
+        } else {
+          window.dispatchEvent(new CustomEvent('ok-payment-failed', { detail: data }));
+        }
+      }
+
+      if (method === 'showRewardedVideo') {
+        if (result === 'ok') {
+          window.dispatchEvent(new CustomEvent('ok-ads-rewarded', { detail: data }));
+        } else {
+          window.dispatchEvent(new CustomEvent('ok-ads-failed', { detail: data }));
+        }
+      }
+
+      if (method === 'showAd') {
+        window.dispatchEvent(new CustomEvent('ok-ads-completed', { detail: data }));
+      }
+    };
   }
 
   // ------------------------------------------------------------------ VK STORAGE HELPERS
@@ -1029,13 +1076,46 @@ class PromtiGame {
     }
 
     if (this.platform === 'ok') {
+      const iapId = this.activePromotion ? ENERGY_IAP_PROMO_ID : ENERGY_IAP_ID;
+      const iapName = 'Энергия (100 ед.)';
+      const iapPrice = this.activePromotion ? 4 : 8; // OK Internal Currency (OKs)
+
+      // Use FAPI if available
+      if (typeof FAPI !== 'undefined' && FAPI.UI && FAPI.UI.showPayment) {
+        return new Promise((resolve) => {
+          const handler = (e) => {
+            window.removeEventListener('ok-payment-success', handler);
+            window.removeEventListener('ok-payment-failed', failHandler);
+            this.energy += ENERGY_IAP_AMOUNT;
+            this._saveProgress();
+            this._updateStatsPanel();
+            this.el.modalEnergyValue.textContent = this.energy;
+            resolve();
+          };
+          const failHandler = (e) => {
+            window.removeEventListener('ok-payment-success', handler);
+            window.removeEventListener('ok-payment-failed', failHandler);
+            resolve();
+          };
+          window.addEventListener('ok-payment-success', handler);
+          window.addEventListener('ok-payment-failed', failHandler);
+
+          try {
+            FAPI.UI.showPayment(iapName, '100 единиц энергии для игры', iapId, iapPrice, null, null, 'ok', 'true');
+          } catch (e) {
+            console.warn('[promti] FAPI showPayment error:', e);
+            resolve();
+          }
+        });
+      }
+
+      // Fallback to OKSDK
       return new Promise((resolve) => {
-        const iapId = this.activePromotion ? ENERGY_IAP_PROMO_ID : ENERGY_IAP_ID;
         OKSDK.Payments.show({
-          name        : 'Энергия',
+          name        : iapName,
           description : '100 единиц энергии для игры',
           code        : iapId,
-          price       : 1,
+          price       : iapPrice,
           uids        : '',
         }, () => {
           this.energy += ENERGY_IAP_AMOUNT;
@@ -1079,6 +1159,31 @@ class PromtiGame {
     }
 
     if (this.platform === 'ok') {
+      // Use FAPI if available (standard for "Games in OK")
+      if (typeof FAPI !== 'undefined' && FAPI.UI && FAPI.UI.showRewardedVideo) {
+        const handler = (e) => {
+          window.removeEventListener('ok-ads-rewarded', handler);
+          window.removeEventListener('ok-ads-failed', failHandler);
+          if (onReward) onReward();
+        };
+        const failHandler = (e) => {
+          window.removeEventListener('ok-ads-rewarded', handler);
+          window.removeEventListener('ok-ads-failed', failHandler);
+          if (onNoReward) onNoReward();
+        };
+        window.addEventListener('ok-ads-rewarded', handler);
+        window.addEventListener('ok-ads-failed', failHandler);
+
+        try {
+          FAPI.UI.showRewardedVideo();
+        } catch (e) {
+          console.warn('[promti] FAPI showRewardedVideo error:', e);
+          if (onNoReward) onNoReward();
+        }
+        return;
+      }
+
+      // Fallback to OKSDK
       try {
         OKSDK.Ads.load({ format: 'reward' }, (adId) => {
           try {
@@ -1135,6 +1240,24 @@ class PromtiGame {
     }
 
     if (this.platform === 'ok') {
+      // Use FAPI if available
+      if (typeof FAPI !== 'undefined' && FAPI.UI && FAPI.UI.showAd) {
+        const handler = (e) => {
+          window.removeEventListener('ok-ads-completed', handler);
+          if (callback) callback();
+        };
+        window.addEventListener('ok-ads-completed', handler);
+
+        try {
+          FAPI.UI.showAd();
+        } catch (e) {
+          console.warn('[promti] FAPI showAd error:', e);
+          if (callback) callback();
+        }
+        return;
+      }
+
+      // Fallback to OKSDK
       try {
         OKSDK.Ads.load({ format: 'interstitial' }, (adId) => {
           try {
