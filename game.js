@@ -378,7 +378,6 @@ class PromtiGame {
       if (method === 'showAd') {
         window.dispatchEvent(new CustomEvent('ok-ads-completed', { detail: data }));
       }
-    };
   }
 
   // ------------------------------------------------------------------ VK STORAGE HELPERS
