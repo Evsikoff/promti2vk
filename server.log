@@ -1,8 +1,0 @@
-127.0.0.1 - - [11/Mar/2026 15:42:06] "GET / HTTP/1.1" 200 -
-127.0.0.1 - - [11/Mar/2026 15:42:06] "GET /style.css HTTP/1.1" 200 -
-127.0.0.1 - - [11/Mar/2026 15:42:06] "GET /libs/marked.min.js HTTP/1.1" 200 -
-127.0.0.1 - - [11/Mar/2026 15:42:06] "GET /game.js HTTP/1.1" 200 -
-127.0.0.1 - - [11/Mar/2026 15:42:07] "GET /phrases.json HTTP/1.1" 200 -
-127.0.0.1 - - [11/Mar/2026 15:42:07] "GET /forbidden_words.json HTTP/1.1" 200 -
-127.0.0.1 - - [11/Mar/2026 15:42:07] "GET /dictionaries.json HTTP/1.1" 200 -
-127.0.0.1 - - [11/Mar/2026 15:42:07] "GET /promotions.json HTTP/1.1" 200 -
