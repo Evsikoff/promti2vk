@@ -266,24 +266,44 @@ class PromtiGame {
   // ------------------------------------------------------------------ OK SDK
   _initOK() {
     return new Promise((resolve) => {
-      const sdk = (typeof OKSDK !== 'undefined' && OKSDK) || null;
-      if (!sdk) {
-        console.info('[promti] OKSDK not found — running in dev mode on OK.');
-        resolve();
-        return;
-      }
       const params = new URLSearchParams(window.location.search);
-      sdk.init({
-        app_id             : params.get('application_id') || '',
-        session_secret_key : params.get('session_secret_key') || params.get('auth_sig') || '',
-      }, () => {
-        this.okReady = true;
-        console.info('[promti] OKSDK initialized');
-        resolve();
-      }, (err) => {
-        console.warn('[promti] OKSDK init failed:', err);
-        resolve();
-      });
+      const appId     = params.get('application_id') || '';
+      const sessKey   = params.get('session_secret_key') || params.get('auth_sig') || '';
+      const apiServer = params.get('api_server') || '';
+
+      const tryInit = () => {
+        const sdk = (typeof OKSDK !== 'undefined' && OKSDK) || null;
+        if (!sdk) {
+          console.info('[promti] OKSDK not found — dev mode on OK.');
+          resolve();
+          return;
+        }
+        sdk.init({
+          app_id             : appId,
+          session_secret_key : sessKey,
+          api_server         : apiServer,
+        }, () => {
+          this.okReady = true;
+          console.info('[promti] OKSDK initialized');
+          resolve();
+        }, (err) => {
+          console.warn('[promti] OKSDK init failed:', err);
+          resolve();
+        });
+      };
+
+      if (typeof OKSDK !== 'undefined') {
+        tryInit();
+      } else {
+        const script = document.createElement('script');
+        script.src = 'https://api.ok.ru/js/sdk.js';
+        script.onload = tryInit;
+        script.onerror = () => {
+          console.warn('[promti] Could not load OKSDK script');
+          resolve();
+        };
+        document.head.appendChild(script);
+      }
     });
   }
 
@@ -1059,16 +1079,26 @@ class PromtiGame {
     }
 
     if (this.platform === 'ok') {
-      OKSDK.ads.load({ format: 'reward' }, (adId) => {
-        OKSDK.ads.show(adId, () => {
-          if (onReward) onReward();
+      try {
+        OKSDK.Ads.load({ format: 'reward' }, (adId) => {
+          try {
+            OKSDK.Ads.show(adId, () => {
+              if (onReward) onReward();
+            }, () => {
+              if (onNoReward) onNoReward();
+            });
+          } catch (e) {
+            console.warn('[promti] OK Ads.show error:', e);
+            if (onNoReward) onNoReward();
+          }
         }, () => {
+          console.warn('[promti] No OK rewarded ad available');
           if (onNoReward) onNoReward();
         });
-      }, () => {
-        console.warn('[promti] No OK rewarded ad available');
+      } catch (e) {
+        console.warn('[promti] OK Ads.load error:', e);
         if (onNoReward) onNoReward();
-      });
+      }
       return;
     }
 
@@ -1099,10 +1129,34 @@ class PromtiGame {
   }
 
   async _showFullscreenAd(callback) {
-    if (!this.vkBridgeReady) {
+    if (!this.vkBridgeReady && !this.okReady) {
       if (callback) callback();
       return;
     }
+
+    if (this.platform === 'ok') {
+      try {
+        OKSDK.Ads.load({ format: 'interstitial' }, (adId) => {
+          try {
+            OKSDK.Ads.show(adId, () => {
+              if (callback) callback();
+            }, () => {
+              if (callback) callback();
+            });
+          } catch (e) {
+            console.warn('[promti] OK interstitial show error:', e);
+            if (callback) callback();
+          }
+        }, () => {
+          if (callback) callback();
+        });
+      } catch (e) {
+        console.warn('[promti] OK interstitial load error:', e);
+        if (callback) callback();
+      }
+      return;
+    }
+
     try {
       await this._bridge.send('VKWebAppShowNativeAds', {
         ad_format: 'interstitial'
