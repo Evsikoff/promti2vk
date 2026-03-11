@@ -20,6 +20,9 @@ class PromtiGame {
     this._bridge       = null;
     this.vkBridgeReady = false;
 
+    // OK SDK ready flag (set in _initOK)
+    this.okReady       = false;
+
     // Platform: null (web/dev), 'vk', or 'ok'
     this.platform      = null;
 
@@ -77,6 +80,11 @@ class PromtiGame {
     if (this.platform !== 'ok') {
       await Promise.race([
         this._initVK(),
+        new Promise(resolve => setTimeout(resolve, 8000))
+      ]);
+    } else {
+      await Promise.race([
+        this._initOK(),
         new Promise(resolve => setTimeout(resolve, 8000))
       ]);
     }
@@ -253,6 +261,30 @@ class PromtiGame {
     } catch (e) {
       console.warn('[promti] VK Storage load failed:', e.message);
     }
+  }
+
+  // ------------------------------------------------------------------ OK SDK
+  _initOK() {
+    return new Promise((resolve) => {
+      const sdk = (typeof OKSDK !== 'undefined' && OKSDK) || null;
+      if (!sdk) {
+        console.info('[promti] OKSDK not found — running in dev mode on OK.');
+        resolve();
+        return;
+      }
+      const params = new URLSearchParams(window.location.search);
+      sdk.init({
+        app_id             : params.get('application_id') || '',
+        session_secret_key : params.get('session_secret_key') || params.get('auth_sig') || '',
+      }, () => {
+        this.okReady = true;
+        console.info('[promti] OKSDK initialized');
+        resolve();
+      }, (err) => {
+        console.warn('[promti] OKSDK init failed:', err);
+        resolve();
+      });
+    });
   }
 
   // ------------------------------------------------------------------ VK STORAGE HELPERS
@@ -967,7 +999,7 @@ class PromtiGame {
   }
 
   async _handleEnergyPurchase() {
-    if (!this.vkBridgeReady) {
+    if (!this.vkBridgeReady && !this.okReady) {
       // Dev mode: grant instantly
       this.energy += ENERGY_IAP_AMOUNT;
       this._saveProgress();
@@ -975,6 +1007,29 @@ class PromtiGame {
       this.el.modalEnergyValue.textContent = this.energy;
       return;
     }
+
+    if (this.platform === 'ok') {
+      return new Promise((resolve) => {
+        const iapId = this.activePromotion ? ENERGY_IAP_PROMO_ID : ENERGY_IAP_ID;
+        OKSDK.Payments.show({
+          name        : 'Энергия',
+          description : '100 единиц энергии для игры',
+          code        : iapId,
+          price       : 1,
+          uids        : '',
+        }, () => {
+          this.energy += ENERGY_IAP_AMOUNT;
+          this._saveProgress();
+          this._updateStatsPanel();
+          this.el.modalEnergyValue.textContent = this.energy;
+          resolve();
+        }, (err) => {
+          console.warn('[promti] OK payment cancelled or failed:', err);
+          resolve();
+        });
+      });
+    }
+
     try {
       const iapId = this.activePromotion ? ENERGY_IAP_PROMO_ID : ENERGY_IAP_ID;
       const data = await this._bridge.send('VKWebAppShowOrderBox', {
@@ -997,11 +1052,26 @@ class PromtiGame {
 
   // ------------------------------------------------------------------ ADS
   async _showRewardedVideo(onReward, onNoReward) {
-    if (!this.vkBridgeReady) {
+    if (!this.vkBridgeReady && !this.okReady) {
       // Dev mode: always reward
       if (onReward) onReward();
       return;
     }
+
+    if (this.platform === 'ok') {
+      OKSDK.ads.load({ format: 'reward' }, (adId) => {
+        OKSDK.ads.show(adId, () => {
+          if (onReward) onReward();
+        }, () => {
+          if (onNoReward) onNoReward();
+        });
+      }, () => {
+        console.warn('[promti] No OK rewarded ad available');
+        if (onNoReward) onNoReward();
+      });
+      return;
+    }
+
     try {
       // Check if rewarded ad is available (triggers preload if not)
       const checkData = await this._bridge.send('VKWebAppCheckNativeAds', {
