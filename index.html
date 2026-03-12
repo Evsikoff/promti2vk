@@ -29,6 +29,15 @@
       window.parent.postMessage({ type: 'wheel', deltaY: e.deltaY, deltaX: e.deltaX }, '*');
     }, { passive: true });
 
+    // ── Redirect wheel events that land outside #app-container to scroll it ──
+    document.addEventListener('wheel', (e) => {
+      const appContainer = document.getElementById('app-container');
+      if (appContainer && !appContainer.contains(e.target)) {
+        appContainer.scrollTop += e.deltaY;
+        appContainer.scrollLeft += e.deltaX;
+      }
+    }, { passive: true });
+
     // Pull-to-refresh is blocked via CSS overscroll-behavior:contain on #app-container.
   </script>
 </head>
