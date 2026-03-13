@@ -1215,6 +1215,10 @@ class PromtiGame {
       }
 
       // Fallback to OKSDK
+      if (typeof OKSDK === 'undefined') {
+        console.warn('[promti:buy] OKSDK not available — no payment method found, aborting');
+        return;
+      }
       console.info('[promti:buy] FAPI unavailable → falling back to OKSDK.Payments.show');
       const oksdkPayload = {
         name        : iapName,
