@@ -276,23 +276,39 @@ class PromtiGame {
   // ------------------------------------------------------------------ OK SDK
   _initOK() {
     return new Promise((resolve) => {
-      // 1. Check for FAPI (standard OK SDK used in iframes)
-      let fapi = null;
-      try {
-        fapi = (typeof FAPI !== 'undefined' && FAPI) || (window.parent && typeof window.parent.FAPI !== 'undefined' && window.parent.FAPI) || null;
-      } catch (e) {
-        // Cross-origin parent access blocked
-      }
+      // 1. Poll for FAPI — OK injects it asynchronously after iframe load
+      const POLL_INTERVAL = 100; // ms
+      const POLL_TIMEOUT  = 4000; // ms (leaves ~1 s for OKSDK fallback within the outer 5 s race)
+      let elapsed = 0;
 
-      if (fapi) {
+      const resolveFAPI = (fapi) => {
         this.okReady = true;
         this._setupOKCallbacks();
-        console.info('[promti] FAPI (OK SDK) found and hooked');
+        console.info('[promti] FAPI (OK SDK) found and hooked (after %d ms)', elapsed);
         resolve();
-        return;
-      }
+      };
 
-      // 2. Fallback to OKSDK (for external sites or if FAPI not pre-loaded)
+      const checkFAPI = () => {
+        let fapi = null;
+        try {
+          fapi = (typeof FAPI !== 'undefined' && FAPI) ||
+                 (window.parent && typeof window.parent.FAPI !== 'undefined' && window.parent.FAPI) || null;
+        } catch (e) {
+          // Cross-origin parent access blocked
+        }
+
+        if (fapi) { resolveFAPI(fapi); return; }
+
+        elapsed += POLL_INTERVAL;
+        if (elapsed < POLL_TIMEOUT) {
+          setTimeout(checkFAPI, POLL_INTERVAL);
+        } else {
+          console.info('[promti] FAPI not found after %d ms — falling back to OKSDK', POLL_TIMEOUT);
+          tryOKSDK();
+        }
+      };
+
+      // 2. Fallback to OKSDK (external sites or if FAPI never appeared)
       const params = new URLSearchParams(window.location.search);
       const appId     = params.get('application_id') || params.get('api_id') || '';
       const sessKey   = params.get('session_secret_key') || params.get('auth_sig') || params.get('session_key') || '';
@@ -320,18 +336,22 @@ class PromtiGame {
         });
       };
 
-      if (typeof OKSDK !== 'undefined') {
-        tryInit();
-      } else {
-        const script = document.createElement('script');
-        script.src = 'https://api.ok.ru/js/sdk.js';
-        script.onload = tryInit;
-        script.onerror = () => {
-          console.warn('[promti] Could not load OKSDK script');
-          resolve();
-        };
-        document.head.appendChild(script);
-      }
+      const tryOKSDK = () => {
+        if (typeof OKSDK !== 'undefined') {
+          tryInit();
+        } else {
+          const script = document.createElement('script');
+          script.src = 'https://api.ok.ru/js/sdk.js';
+          script.onload = tryInit;
+          script.onerror = () => {
+            console.warn('[promti] Could not load OKSDK script');
+            resolve();
+          };
+          document.head.appendChild(script);
+        }
+      };
+
+      checkFAPI();
     });
   }
 
