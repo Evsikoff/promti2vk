@@ -1118,7 +1118,7 @@ class PromtiGame {
       this.activePromotion ? this.activePromotion.name : 'none');
     console.info('[promti:buy] iapId=%s | energy_before=%d', iapId, this.energy);
 
-    // 1. If OK platform — use OK-specific branch ONLY
+    // 1. If OK platform — try OK-specific APIs first, then VK fallback when unavailable
     if (this.platform === 'ok') {
       console.info('[promti:buy] platform=ok → entering OK payment path');
       const iapName = 'Энергия (100 ед.)';
@@ -1141,18 +1141,18 @@ class PromtiGame {
           price       : iapPrice,
         };
 
-        return new Promise((resolve) => {
+        const paidWithOKSDK = await new Promise((resolve) => {
           const success = () => {
             this.energy += ENERGY_IAP_AMOUNT;
             console.info('[promti:buy] OKSDK payment success → energy +%d, new total=%d', ENERGY_IAP_AMOUNT, this.energy);
             this._saveProgress();
             this._updateStatsPanel();
             this.el.modalEnergyValue.textContent = this.energy;
-            resolve();
+            resolve(true);
           };
           const failure = (err) => {
             console.warn('[promti] OK payment cancelled or failed:', err);
-            resolve();
+            resolve(false);
           };
 
           if (isAndroidApp) {
@@ -1166,12 +1166,16 @@ class PromtiGame {
             okPayment.show(oksdkPayload, success, failure);
           }
         });
+
+        if (paidWithOKSDK) {
+          return;
+        }
       }
 
       // FAPI Fallback
       if (typeof FAPI !== 'undefined' && FAPI.UI && FAPI.UI.showPayment) {
         console.info('[promti:buy] FAPI path selected → registering ok-payment-success / ok-payment-failed listeners');
-        return new Promise((resolve) => {
+        const fapiResult = await new Promise((resolve) => {
           const handler = (e) => {
             window.removeEventListener('ok-payment-success', handler);
             window.removeEventListener('ok-payment-failed', failHandler);
@@ -1181,13 +1185,13 @@ class PromtiGame {
             this._saveProgress();
             this._updateStatsPanel();
             this.el.modalEnergyValue.textContent = this.energy;
-            resolve();
+            resolve({ paid: true, error: null });
           };
           const failHandler = (e) => {
             window.removeEventListener('ok-payment-success', handler);
             window.removeEventListener('ok-payment-failed', failHandler);
             console.warn('[promti:buy] ok-payment-failed received, detail=%o', e.detail);
-            resolve();
+            resolve({ paid: false, error: e.detail || null });
           };
           window.addEventListener('ok-payment-success', handler);
           window.addEventListener('ok-payment-failed', failHandler);
@@ -1196,13 +1200,31 @@ class PromtiGame {
             console.info('[promti:buy] FAPI.UI.showPayment() called — waiting for callback');
           } catch (e) {
             console.warn('[promti] FAPI showPayment error:', e);
-            resolve();
+            resolve({ paid: false, error: e || null });
           }
         });
+
+        if (fapiResult.paid) {
+          return;
+        }
+
+        const unsupportedInVKContainer =
+          Number(fapiResult?.error?.error_code) === -1
+          && String(fapiResult?.error?.error_message || '').includes('UI methods are available only for apps running on OK portal');
+
+        if (!this.vkBridgeReady || !unsupportedInVKContainer) {
+          return;
+        }
+
+        console.info('[promti:buy] OK FAPI payment is not available in VK container → falling back to VKWebAppShowOrderBox');
       }
 
-      console.warn('[promti:buy] No OK payment method found, aborting');
-      return;
+      if (!this.vkBridgeReady) {
+        console.warn('[promti:buy] No OK payment method found and VK bridge unavailable, aborting');
+        return;
+      }
+
+      console.info('[promti:buy] No usable OK payment method, VK bridge is ready → using VKWebAppShowOrderBox fallback');
     }
 
     // 2. Try VK Bridge if ready
