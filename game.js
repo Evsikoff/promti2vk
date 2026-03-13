@@ -1228,7 +1228,7 @@ class PromtiGame {
     }
 
     // 2. Try VK Bridge if ready
-    if (this.vkBridgeReady) {
+    if (this.platform !== 'ok' && this.vkBridgeReady) {
       console.info('[promti:buy] vkBridgeReady=true → trying VKWebAppShowOrderBox, item=%s', iapId);
       try {
         const data = await this._bridge.send('VKWebAppShowOrderBox', {
