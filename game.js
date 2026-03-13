@@ -1,9 +1,5 @@
 'use strict';
 
-// Global OK SDK callbacks must exist before SDK is invoked to avoid ReferenceError
-window.API_callback  = window.API_callback  || function() {};
-window.FAPI_callback = window.FAPI_callback || function() {};
-
 // ===== CONFIG =====
 const DEEPSEEK_API_KEY = 'sk-9bd0908d76194c21bb304fe259a4e7fc';
 const DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';
@@ -286,11 +282,23 @@ class PromtiGame {
   // ------------------------------------------------------------------ OK SDK
   _initOK() {
     return new Promise((resolve) => {
+      let rParams = {};
+      try {
+        if (typeof FAPI !== 'undefined' && FAPI.Util && FAPI.Util.getRequestParameters) {
+          rParams = FAPI.Util.getRequestParameters();
+        }
+      } catch (e) {
+        console.warn('[promti] FAPI.Util.getRequestParameters failed:', e);
+      }
+
       const params = new URLSearchParams(window.location.search);
-      const appId         = params.get('application_id') || params.get('api_id') || '';
-      const sessKey       = params.get('session_secret_key') || params.get('auth_sig') || params.get('session_key') || '';
-      const apiServer     = params.get('api_server') || '';
-      const apiConnection = params.get('apiconnection') || '';
+      const appId         = rParams['application_id'] || rParams['api_id'] || params.get('application_id') || params.get('api_id') || params.get('vk_app_id') || '';
+      const sessKey       = rParams['session_secret_key'] || rParams['auth_sig'] || rParams['session_key'] || params.get('session_secret_key') || params.get('auth_sig') || params.get('session_key') || '';
+      const apiServer     = rParams['api_server'] || params.get('api_server') || '';
+      const apiConnection = rParams['apiconnection'] || params.get('apiconnection') || '';
+
+      console.info('[promti:ok] Init params: appId=%s | apiServer=%s | apiConnection=%s | hasSessKey=%s',
+        appId, apiServer, apiConnection, !!sessKey);
 
       const initFAPI = () => {
         if (typeof FAPI !== 'undefined' && apiServer && apiConnection) {
@@ -1118,7 +1126,10 @@ class PromtiGame {
       console.info('[promti:buy] iapName=%s | iapPrice=%d ОКов', iapName, iapPrice);
 
       // Preferred: OKSDK.Payment.show/showInFrame
-      if (typeof OKSDK !== 'undefined' && OKSDK.Payment) {
+      const okPayment = (typeof OKSDK !== 'undefined') ? (OKSDK.Payment || OKSDK.Payments) : null;
+      console.info('[promti:buy] Checking OKSDK Payment API: exists=%s', !!okPayment);
+
+      if (okPayment && okPayment.show) {
         const ua = navigator.userAgent || '';
         const isAndroidApp = ua.includes('OKApp') && ua.includes('Android');
         const isMobileChrome = (ua.includes('Chrome') || ua.includes('CriOS')) && (ua.includes('Android') || ua.includes('iPhone'));
@@ -1145,14 +1156,14 @@ class PromtiGame {
           };
 
           if (isAndroidApp) {
-            console.info('[promti:buy] Android App detected → OKSDK.Payment.show');
-            OKSDK.Payment.show(oksdkPayload, success, failure);
-          } else if (isMobileChrome) {
-            console.info('[promti:buy] Mobile Chrome detected → OKSDK.Payment.showInFrame');
-            OKSDK.Payment.showInFrame(oksdkPayload, success, failure);
+            console.info('[promti:buy] Android App detected → Payment.show');
+            okPayment.show(oksdkPayload, success, failure);
+          } else if (isMobileChrome && okPayment.showInFrame) {
+            console.info('[promti:buy] Mobile Chrome detected → Payment.showInFrame');
+            okPayment.showInFrame(oksdkPayload, success, failure);
           } else {
-            console.info('[promti:buy] Default environment → OKSDK.Payment.show');
-            OKSDK.Payment.show(oksdkPayload, success, failure);
+            console.info('[promti:buy] Default environment → Payment.show');
+            okPayment.show(oksdkPayload, success, failure);
           }
         });
       }
