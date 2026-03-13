@@ -1118,7 +1118,7 @@ class PromtiGame {
       this.activePromotion ? this.activePromotion.name : 'none');
     console.info('[promti:buy] iapId=%s | energy_before=%d', iapId, this.energy);
 
-    // 1. If OK platform — use OK-specific branch ONLY
+    // 1. If OK platform — try OK-specific APIs first, then VK fallback when unavailable
     if (this.platform === 'ok') {
       console.info('[promti:buy] platform=ok → entering OK payment path');
       const iapName = 'Энергия (100 ед.)';
@@ -1141,18 +1141,18 @@ class PromtiGame {
           price       : iapPrice,
         };
 
-        return new Promise((resolve) => {
+        const paidWithOKSDK = await new Promise((resolve) => {
           const success = () => {
             this.energy += ENERGY_IAP_AMOUNT;
             console.info('[promti:buy] OKSDK payment success → energy +%d, new total=%d', ENERGY_IAP_AMOUNT, this.energy);
             this._saveProgress();
             this._updateStatsPanel();
             this.el.modalEnergyValue.textContent = this.energy;
-            resolve();
+            resolve(true);
           };
           const failure = (err) => {
             console.warn('[promti] OK payment cancelled or failed:', err);
-            resolve();
+            resolve(false);
           };
 
           if (isAndroidApp) {
@@ -1166,12 +1166,16 @@ class PromtiGame {
             okPayment.show(oksdkPayload, success, failure);
           }
         });
+
+        if (paidWithOKSDK) {
+          return;
+        }
       }
 
       // FAPI Fallback
       if (typeof FAPI !== 'undefined' && FAPI.UI && FAPI.UI.showPayment) {
         console.info('[promti:buy] FAPI path selected → registering ok-payment-success / ok-payment-failed listeners');
-        return new Promise((resolve) => {
+        const fapiResult = await new Promise((resolve) => {
           const handler = (e) => {
             window.removeEventListener('ok-payment-success', handler);
             window.removeEventListener('ok-payment-failed', failHandler);
@@ -1181,13 +1185,13 @@ class PromtiGame {
             this._saveProgress();
             this._updateStatsPanel();
             this.el.modalEnergyValue.textContent = this.energy;
-            resolve();
+            resolve({ paid: true, error: null });
           };
           const failHandler = (e) => {
             window.removeEventListener('ok-payment-success', handler);
             window.removeEventListener('ok-payment-failed', failHandler);
             console.warn('[promti:buy] ok-payment-failed received, detail=%o', e.detail);
-            resolve();
+            resolve({ paid: false, error: e.detail || null });
           };
           window.addEventListener('ok-payment-success', handler);
           window.addEventListener('ok-payment-failed', failHandler);
@@ -1196,17 +1200,89 @@ class PromtiGame {
             console.info('[promti:buy] FAPI.UI.showPayment() called — waiting for callback');
           } catch (e) {
             console.warn('[promti] FAPI showPayment error:', e);
-            resolve();
+            resolve({ paid: false, error: e || null });
           }
         });
+
+        if (fapiResult.paid) {
+          return;
+        }
+
+        const unsupportedInVKContainer =
+          Number(fapiResult?.error?.error_code) === -1
+          && String(fapiResult?.error?.error_message || '').includes('UI methods are available only for apps running on OK portal');
+
+        if (!unsupportedInVKContainer) {
+          return;
+        }
+
+        console.info('[promti:buy] OK FAPI payment is not available in VK container → trying OKWebAppCallAPIMethod');
       }
 
-      console.warn('[promti:buy] No OK payment method found, aborting');
+      if (this.vkBridgeReady) {
+        const okBridgeResult = await new Promise((resolve) => {
+          let settled = false;
+          const done = (result) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            window.removeEventListener('ok-payment-success', successHandler);
+            window.removeEventListener('ok-payment-failed', failHandler);
+            resolve(result);
+          };
+
+          const successHandler = (e) => {
+            console.info('[promti:buy] OK bridge callback success, detail=%o', e.detail);
+            this.energy += ENERGY_IAP_AMOUNT;
+            this._saveProgress();
+            this._updateStatsPanel();
+            this.el.modalEnergyValue.textContent = this.energy;
+            done({ paid: true });
+          };
+
+          const failHandler = (e) => {
+            console.warn('[promti:buy] OK bridge callback failed, detail=%o', e.detail);
+            done({ paid: false, error: e.detail || null });
+          };
+
+          const timer = setTimeout(() => {
+            console.warn('[promti:buy] OK bridge callback timeout');
+            done({ paid: false, timeout: true });
+          }, 15000);
+
+          window.addEventListener('ok-payment-success', successHandler);
+          window.addEventListener('ok-payment-failed', failHandler);
+
+          this._bridge.send('OKWebAppCallAPIMethod', {
+            method: 'showPayment',
+            params: {
+              name: iapName,
+              description: '100 единиц энергии для игры',
+              code: iapId,
+              price: iapPrice,
+            },
+          }).then((data) => {
+            console.info('[promti:buy] OKWebAppCallAPIMethod response: %o', data);
+          }).catch((e) => {
+            console.warn('[promti:buy] OKWebAppCallAPIMethod failed:', e);
+            done({ paid: false, error: e });
+          });
+        });
+
+        if (okBridgeResult.paid) {
+          return;
+        }
+
+        console.warn('[promti:buy] OK payment is unavailable in current container, aborting without VKWebAppShowOrderBox');
+        return;
+      }
+
+      console.warn('[promti:buy] No OK payment method found and VK bridge unavailable, aborting');
       return;
     }
 
     // 2. Try VK Bridge if ready
-    if (this.vkBridgeReady) {
+    if (this.platform !== 'ok' && this.vkBridgeReady) {
       console.info('[promti:buy] vkBridgeReady=true → trying VKWebAppShowOrderBox, item=%s', iapId);
       try {
         const data = await this._bridge.send('VKWebAppShowOrderBox', {
