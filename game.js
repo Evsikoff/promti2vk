@@ -189,7 +189,8 @@ class PromtiGame {
       vkPlatform.endsWith('_ok') ||
       params.has('vk_ok_app_id') ||
       apiServer.includes('ok.ru') ||
-      (typeof FAPI !== 'undefined')
+      (typeof FAPI !== 'undefined') ||
+      params.has('api_id') // common for OK
     ) {
       this.platform = 'ok';
       console.info('[promti] Odnoklassniki platform detected');
@@ -276,87 +277,64 @@ class PromtiGame {
   // ------------------------------------------------------------------ OK SDK
   _initOK() {
     return new Promise((resolve) => {
-      // 1. Poll for FAPI — OK injects it asynchronously after iframe load
-      const POLL_INTERVAL = 100; // ms
-      const POLL_TIMEOUT  = 4000; // ms (leaves ~1 s for OKSDK fallback within the outer 5 s race)
-      let elapsed = 0;
-
-      const resolveFAPI = (fapi) => {
-        this.okReady = true;
-        this._setupOKCallbacks();
-        console.info('[promti] FAPI (OK SDK) found and hooked (after %d ms)', elapsed);
-        resolve();
-      };
-
-      const checkFAPI = () => {
-        let fapi = null;
-        try {
-          fapi = (typeof FAPI !== 'undefined' && FAPI) ||
-                 (window.parent && typeof window.parent.FAPI !== 'undefined' && window.parent.FAPI) || null;
-        } catch (e) {
-          // Cross-origin parent access blocked
-        }
-
-        if (fapi) { resolveFAPI(fapi); return; }
-
-        elapsed += POLL_INTERVAL;
-        if (elapsed < POLL_TIMEOUT) {
-          setTimeout(checkFAPI, POLL_INTERVAL);
-        } else {
-          console.info('[promti] FAPI not found after %d ms — falling back to OKSDK', POLL_TIMEOUT);
-          tryOKSDK();
-        }
-      };
-
-      // 2. Fallback to OKSDK (external sites or if FAPI never appeared)
       const params = new URLSearchParams(window.location.search);
-      const appId     = params.get('application_id') || params.get('api_id') || '';
-      const sessKey   = params.get('session_secret_key') || params.get('auth_sig') || params.get('session_key') || '';
-      const apiServer = params.get('api_server') || '';
+      const appId         = params.get('application_id') || params.get('api_id') || '';
+      const sessKey       = params.get('session_secret_key') || params.get('auth_sig') || params.get('session_key') || '';
+      const apiServer     = params.get('api_server') || '';
+      const apiConnection = params.get('apiconnection') || '';
 
-      const tryInit = () => {
-        const sdk = (typeof OKSDK !== 'undefined' && OKSDK) || null;
-        if (!sdk) {
-          console.info('[promti] OKSDK not found — checking FAPI again or dev mode.');
-          resolve();
-          return;
-        }
-        sdk.init({
-          app_id             : appId,
-          session_secret_key : sessKey,
-          api_server         : apiServer,
-        }, () => {
-          this.okReady = true;
-          this._setupOKCallbacks();
-          console.info('[promti] OKSDK initialized');
-          resolve();
-        }, (err) => {
-          console.warn('[promti] OKSDK init failed:', err);
-          resolve();
-        });
-      };
-
-      const tryOKSDK = () => {
-        if (typeof OKSDK !== 'undefined') {
-          tryInit();
+      const initFAPI = () => {
+        if (typeof FAPI !== 'undefined') {
+          try {
+            // Signature: FAPI.init(apiServer, apiConnection, onSuccess, onError)
+            FAPI.init(apiServer, apiConnection, () => {
+              this.okReady = true;
+              this._setupOKCallbacks();
+              console.info('[promti] FAPI initialized');
+              // After FAPI, also init OKSDK
+              initOKSDK();
+            }, (err) => {
+              console.warn('[promti] FAPI init failed:', err);
+              initOKSDK();
+            });
+          } catch (e) {
+            console.warn('[promti] FAPI.init threw error:', e);
+            initOKSDK();
+          }
         } else {
-          const script = document.createElement('script');
-          script.src = 'https://api.ok.ru/js/sdk.js';
-          script.onload = tryInit;
-          script.onerror = () => {
-            console.warn('[promti] Could not load OKSDK script');
-            resolve();
-          };
-          document.head.appendChild(script);
+          initOKSDK();
         }
       };
 
-      checkFAPI();
+      const initOKSDK = () => {
+        if (typeof OKSDK !== 'undefined') {
+          OKSDK.init({
+            app_id             : appId,
+            session_secret_key : sessKey,
+            api_server         : apiServer,
+          }, () => {
+            this.okReady = true;
+            this._setupOKCallbacks();
+            console.info('[promti] OKSDK initialized');
+            resolve();
+          }, (err) => {
+            console.warn('[promti] OKSDK init failed:', err);
+            resolve();
+          });
+        } else {
+          resolve();
+        }
+      };
+
+      initFAPI();
     });
   }
 
   // FAPI uses a global API_callback function to return results
   _setupOKCallbacks() {
+    if (this._okCallbacksSetup) return;
+    this._okCallbacksSetup = true;
+
     const self = this;
     const hook = (originalCallback) => {
       return function(method, result, data) {
@@ -1120,67 +1098,55 @@ class PromtiGame {
       this.activePromotion ? this.activePromotion.name : 'none');
     console.info('[promti:buy] iapId=%s | energy_before=%d', iapId, this.energy);
 
-    // 1. Try VK Bridge if ready (even on OK platform)
-    if (this.vkBridgeReady) {
-      console.info('[promti:buy] vkBridgeReady=true → trying VKWebAppShowOrderBox, item=%s', iapId);
-      try {
-        const data = await this._bridge.send('VKWebAppShowOrderBox', {
-          type: 'item',
-          item: iapId
-        });
-        console.info('[promti:buy] VK Bridge result: %o', data);
-        if (data.success) {
-          this.energy += ENERGY_IAP_AMOUNT;
-          console.info('[promti:buy] VK Bridge success → energy +%d, new total=%d', ENERGY_IAP_AMOUNT, this.energy);
-          this._saveProgress();
-          this._updateStatsPanel();
-          this.el.modalEnergyValue.textContent = this.energy;
-        } else {
-          console.warn('[promti:buy] VK Bridge returned success=false (no charge)');
-        }
-        return;
-      } catch (e) {
-        console.warn('[promti] VK Bridge purchase failed, trying fallback...', e);
-        // If user didn't just close it, we might want to try FAPI fallback below
-        if (e?.error_data?.error_reason === 'User closed payment dialog') {
-          console.info('[promti:buy] User closed VK payment dialog → aborting');
-          return;
-        }
-      }
-    } else {
-      console.info('[promti:buy] vkBridgeReady=false → skipping VK Bridge');
-    }
-
-    // 2. Fallback to OK/FAPI if on OK
+    // 1. If OK platform — use OK-specific branch ONLY
     if (this.platform === 'ok') {
       console.info('[promti:buy] platform=ok → entering OK payment path');
       const iapName = 'Энергия (100 ед.)';
       const iapPrice = this.activePromotion ? 4 : 8; // OK Internal Currency (OKs)
       console.info('[promti:buy] iapName=%s | iapPrice=%d ОКов', iapName, iapPrice);
 
-      // Use FAPI if available
-      let fapi = null;
-      let fapiSource = 'none';
-      try {
-        const windowFapiType = typeof FAPI !== 'undefined' ? typeof FAPI : 'undefined';
-        let parentFapiType = 'N/A';
-        try { parentFapiType = typeof window.parent.FAPI !== 'undefined' ? typeof window.parent.FAPI : 'undefined'; } catch (_) { parentFapiType = 'cross-origin blocked'; }
-        console.info('[promti:buy] FAPI check: window.FAPI=%s | window.parent.FAPI=%s', windowFapiType, parentFapiType);
+      // Preferred: OKSDK.Payment.show/showInFrame
+      if (typeof OKSDK !== 'undefined' && OKSDK.Payment) {
+        const ua = navigator.userAgent || '';
+        const isAndroidApp = ua.includes('OKApp') && ua.includes('Android');
+        const isMobileChrome = (ua.includes('Chrome') || ua.includes('CriOS')) && (ua.includes('Android') || ua.includes('iPhone'));
 
-        if (typeof FAPI !== 'undefined' && FAPI) {
-          fapi = FAPI;
-          fapiSource = 'window.FAPI';
-        } else if (window.parent && typeof window.parent.FAPI !== 'undefined' && window.parent.FAPI) {
-          fapi = window.parent.FAPI;
-          fapiSource = 'window.parent.FAPI';
-        }
-      } catch (e) {
-        console.warn('[promti:buy] FAPI resolution threw:', e);
+        const oksdkPayload = {
+          name        : iapName,
+          description : '100 единиц энергии для игры',
+          code        : iapId,
+          price       : iapPrice,
+        };
+
+        return new Promise((resolve) => {
+          const success = () => {
+            this.energy += ENERGY_IAP_AMOUNT;
+            console.info('[promti:buy] OKSDK payment success → energy +%d, new total=%d', ENERGY_IAP_AMOUNT, this.energy);
+            this._saveProgress();
+            this._updateStatsPanel();
+            this.el.modalEnergyValue.textContent = this.energy;
+            resolve();
+          };
+          const failure = (err) => {
+            console.warn('[promti] OK payment cancelled or failed:', err);
+            resolve();
+          };
+
+          if (isAndroidApp) {
+            console.info('[promti:buy] Android App detected → OKSDK.Payment.show');
+            OKSDK.Payment.show(oksdkPayload, success, failure);
+          } else if (isMobileChrome) {
+            console.info('[promti:buy] Mobile Chrome detected → OKSDK.Payment.showInFrame');
+            OKSDK.Payment.showInFrame(oksdkPayload, success, failure);
+          } else {
+            console.info('[promti:buy] Default environment → OKSDK.Payment.show');
+            OKSDK.Payment.show(oksdkPayload, success, failure);
+          }
+        });
       }
-      console.info('[promti:buy] fapi resolved from: %s | fapi=%o | has UI.showPayment: %s',
-        fapiSource, fapi, !!(fapi && fapi.UI && fapi.UI.showPayment));
 
-      if (fapi && fapi.UI && fapi.UI.showPayment) {
+      // FAPI Fallback
+      if (typeof FAPI !== 'undefined' && FAPI.UI && FAPI.UI.showPayment) {
         console.info('[promti:buy] FAPI path selected → registering ok-payment-success / ok-payment-failed listeners');
         return new Promise((resolve) => {
           const handler = (e) => {
@@ -1202,11 +1168,9 @@ class PromtiGame {
           };
           window.addEventListener('ok-payment-success', handler);
           window.addEventListener('ok-payment-failed', failHandler);
-          console.info('[promti:buy] Listeners registered, calling fapi.UI.showPayment(%s, ..., %s, %d, null, null, ok, true)',
-            iapName, iapId, iapPrice);
           try {
-            fapi.UI.showPayment(iapName, '100 единиц энергии для игры', iapId, iapPrice, null, null, 'ok', 'true');
-            console.info('[promti:buy] fapi.UI.showPayment() called — waiting for callback');
+            FAPI.UI.showPayment(iapName, '100 единиц энергии для игры', iapId, iapPrice, null, null, 'ok', 'true');
+            console.info('[promti:buy] FAPI.UI.showPayment() called — waiting for callback');
           } catch (e) {
             console.warn('[promti] FAPI showPayment error:', e);
             resolve();
@@ -1214,35 +1178,36 @@ class PromtiGame {
         });
       }
 
-      // Fallback to OKSDK
-      if (typeof OKSDK === 'undefined') {
-        console.warn('[promti:buy] OKSDK not available — no payment method found, aborting');
-        return;
-      }
-      console.info('[promti:buy] FAPI unavailable → falling back to OKSDK.Payments.show');
-      const oksdkPayload = {
-        name        : iapName,
-        description : '100 единиц энергии для игры',
-        code        : iapId,
-        price       : iapPrice,
-        uids        : '',
-      };
-      console.info('[promti:buy] OKSDK.Payments.show args: %o', oksdkPayload);
-      return new Promise((resolve) => {
-        OKSDK.Payments.show(oksdkPayload, () => {
+      console.warn('[promti:buy] No OK payment method found, aborting');
+      return;
+    }
+
+    // 2. Try VK Bridge if ready
+    if (this.vkBridgeReady) {
+      console.info('[promti:buy] vkBridgeReady=true → trying VKWebAppShowOrderBox, item=%s', iapId);
+      try {
+        const data = await this._bridge.send('VKWebAppShowOrderBox', {
+          type: 'item',
+          item: iapId
+        });
+        console.info('[promti:buy] VK Bridge result: %o', data);
+        if (data.success) {
           this.energy += ENERGY_IAP_AMOUNT;
-          console.info('[promti:buy] OKSDK payment success → energy +%d, new total=%d', ENERGY_IAP_AMOUNT, this.energy);
+          console.info('[promti:buy] VK Bridge success → energy +%d, new total=%d', ENERGY_IAP_AMOUNT, this.energy);
           this._saveProgress();
           this._updateStatsPanel();
           this.el.modalEnergyValue.textContent = this.energy;
-          resolve();
-        }, (err) => {
-          console.warn('[promti] OK payment cancelled or failed:', err);
-          resolve();
-        });
-      });
-    } else {
-      console.info('[promti:buy] platform=%s → skipping OK payment path', this.platform);
+        } else {
+          console.warn('[promti:buy] VK Bridge returned success=false (no charge)');
+        }
+        return;
+      } catch (e) {
+        console.warn('[promti] VK Bridge purchase failed:', e);
+        if (e?.error_data?.error_reason === 'User closed payment dialog') {
+          console.info('[promti:buy] User closed VK payment dialog → aborting');
+          return;
+        }
+      }
     }
 
     // Final fallback for dev mode
@@ -1257,31 +1222,10 @@ class PromtiGame {
 
   // ------------------------------------------------------------------ ADS
   async _showRewardedVideo(onReward, onNoReward) {
-    // 1. Try VK Bridge if ready
-    if (this.vkBridgeReady) {
-      try {
-        const checkData = await this._bridge.send('VKWebAppCheckNativeAds', { ad_format: 'reward' });
-        if (checkData.result) {
-          const showData = await this._bridge.send('VKWebAppShowNativeAds', { ad_format: 'reward' });
-          if (showData.result) {
-            if (onReward) onReward();
-            return;
-          }
-        }
-      } catch (e) {
-        console.warn('[promti] VK Bridge rewarded ad failed, trying fallback...', e);
-      }
-    }
-
-    // 2. Fallback to OK/FAPI if on OK
+    // 1. If OK platform — use OK-specific branch ONLY
     if (this.platform === 'ok') {
       // Use FAPI if available (standard for "Games in OK")
-      let fapi = null;
-      try {
-        fapi = (typeof FAPI !== 'undefined' && FAPI) || (window.parent && typeof window.parent.FAPI !== 'undefined' && window.parent.FAPI) || null;
-      } catch (e) {}
-
-      if (fapi && fapi.UI && fapi.UI.showRewardedVideo) {
+      if (typeof FAPI !== 'undefined' && FAPI.UI && FAPI.UI.showRewardedVideo) {
         const handler = (e) => {
           window.removeEventListener('ok-ads-rewarded', handler);
           window.removeEventListener('ok-ads-failed', failHandler);
@@ -1296,7 +1240,7 @@ class PromtiGame {
         window.addEventListener('ok-ads-failed', failHandler);
 
         try {
-          fapi.UI.showRewardedVideo();
+          FAPI.UI.showRewardedVideo();
         } catch (e) {
           console.warn('[promti] FAPI showRewardedVideo error:', e);
           if (onNoReward) onNoReward();
@@ -1328,6 +1272,22 @@ class PromtiGame {
       return;
     }
 
+    // 2. Try VK Bridge if ready
+    if (this.vkBridgeReady) {
+      try {
+        const checkData = await this._bridge.send('VKWebAppCheckNativeAds', { ad_format: 'reward' });
+        if (checkData.result) {
+          const showData = await this._bridge.send('VKWebAppShowNativeAds', { ad_format: 'reward' });
+          if (showData.result) {
+            if (onReward) onReward();
+            return;
+          }
+        }
+      } catch (e) {
+        console.warn('[promti] VK Bridge rewarded ad failed:', e);
+      }
+    }
+
     try {
       // Check if rewarded ad is available (triggers preload if not)
       const checkData = await this._bridge.send('VKWebAppCheckNativeAds', {
@@ -1355,26 +1315,10 @@ class PromtiGame {
   }
 
   async _showFullscreenAd(callback) {
-    // 1. Try VK Bridge if ready
-    if (this.vkBridgeReady) {
-      try {
-        await this._bridge.send('VKWebAppShowNativeAds', { ad_format: 'interstitial' });
-        if (callback) callback();
-        return;
-      } catch (e) {
-        console.warn('[promti] VK Bridge interstitial failed, trying fallback...', e);
-      }
-    }
-
-    // 2. Fallback to OK/FAPI if on OK
+    // 1. If OK platform — use OK-specific branch ONLY
     if (this.platform === 'ok') {
       // Use FAPI if available
-      let fapi = null;
-      try {
-        fapi = (typeof FAPI !== 'undefined' && FAPI) || (window.parent && typeof window.parent.FAPI !== 'undefined' && window.parent.FAPI) || null;
-      } catch (e) {}
-
-      if (fapi && fapi.UI && fapi.UI.showAd) {
+      if (typeof FAPI !== 'undefined' && FAPI.UI && FAPI.UI.showAd) {
         const handler = (e) => {
           window.removeEventListener('ok-ads-completed', handler);
           if (callback) callback();
@@ -1382,7 +1326,7 @@ class PromtiGame {
         window.addEventListener('ok-ads-completed', handler);
 
         try {
-          fapi.UI.showAd();
+          FAPI.UI.showAd();
         } catch (e) {
           console.warn('[promti] FAPI showAd error:', e);
           if (callback) callback();
@@ -1411,6 +1355,17 @@ class PromtiGame {
         if (callback) callback();
       }
       return;
+    }
+
+    // 2. Try VK Bridge if ready
+    if (this.vkBridgeReady) {
+      try {
+        await this._bridge.send('VKWebAppShowNativeAds', { ad_format: 'interstitial' });
+        if (callback) callback();
+        return;
+      } catch (e) {
+        console.warn('[promti] VK Bridge interstitial failed:', e);
+      }
     }
 
     // Final fallback for dev mode
