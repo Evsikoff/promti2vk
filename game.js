@@ -1094,44 +1094,81 @@ class PromtiGame {
   async _handleEnergyPurchase() {
     const iapId = this.activePromotion ? ENERGY_IAP_PROMO_ID : ENERGY_IAP_ID;
 
+    console.info('[promti:buy] === ENERGY PURCHASE STARTED ===');
+    console.info('[promti:buy] platform=%s | vkBridgeReady=%s | okReady=%s | activePromotion=%s',
+      this.platform, this.vkBridgeReady, this.okReady,
+      this.activePromotion ? this.activePromotion.name : 'none');
+    console.info('[promti:buy] iapId=%s | energy_before=%d', iapId, this.energy);
+
     // 1. Try VK Bridge if ready (even on OK platform)
     if (this.vkBridgeReady) {
+      console.info('[promti:buy] vkBridgeReady=true → trying VKWebAppShowOrderBox, item=%s', iapId);
       try {
         const data = await this._bridge.send('VKWebAppShowOrderBox', {
           type: 'item',
           item: iapId
         });
+        console.info('[promti:buy] VK Bridge result: %o', data);
         if (data.success) {
           this.energy += ENERGY_IAP_AMOUNT;
+          console.info('[promti:buy] VK Bridge success → energy +%d, new total=%d', ENERGY_IAP_AMOUNT, this.energy);
           this._saveProgress();
           this._updateStatsPanel();
           this.el.modalEnergyValue.textContent = this.energy;
+        } else {
+          console.warn('[promti:buy] VK Bridge returned success=false (no charge)');
         }
         return;
       } catch (e) {
         console.warn('[promti] VK Bridge purchase failed, trying fallback...', e);
         // If user didn't just close it, we might want to try FAPI fallback below
-        if (e?.error_data?.error_reason === 'User closed payment dialog') return;
+        if (e?.error_data?.error_reason === 'User closed payment dialog') {
+          console.info('[promti:buy] User closed VK payment dialog → aborting');
+          return;
+        }
       }
+    } else {
+      console.info('[promti:buy] vkBridgeReady=false → skipping VK Bridge');
     }
 
     // 2. Fallback to OK/FAPI if on OK
     if (this.platform === 'ok') {
+      console.info('[promti:buy] platform=ok → entering OK payment path');
       const iapName = 'Энергия (100 ед.)';
       const iapPrice = this.activePromotion ? 4 : 8; // OK Internal Currency (OKs)
+      console.info('[promti:buy] iapName=%s | iapPrice=%d ОКов', iapName, iapPrice);
 
       // Use FAPI if available
       let fapi = null;
+      let fapiSource = 'none';
       try {
-        fapi = (typeof FAPI !== 'undefined' && FAPI) || (window.parent && typeof window.parent.FAPI !== 'undefined' && window.parent.FAPI) || null;
-      } catch (e) {}
+        const windowFapiType = typeof FAPI !== 'undefined' ? typeof FAPI : 'undefined';
+        let parentFapiType = 'N/A';
+        try { parentFapiType = typeof window.parent.FAPI !== 'undefined' ? typeof window.parent.FAPI : 'undefined'; } catch (_) { parentFapiType = 'cross-origin blocked'; }
+        console.info('[promti:buy] FAPI check: window.FAPI=%s | window.parent.FAPI=%s', windowFapiType, parentFapiType);
+
+        if (typeof FAPI !== 'undefined' && FAPI) {
+          fapi = FAPI;
+          fapiSource = 'window.FAPI';
+        } else if (window.parent && typeof window.parent.FAPI !== 'undefined' && window.parent.FAPI) {
+          fapi = window.parent.FAPI;
+          fapiSource = 'window.parent.FAPI';
+        }
+      } catch (e) {
+        console.warn('[promti:buy] FAPI resolution threw:', e);
+      }
+      console.info('[promti:buy] fapi resolved from: %s | fapi=%o | has UI.showPayment: %s',
+        fapiSource, fapi, !!(fapi && fapi.UI && fapi.UI.showPayment));
 
       if (fapi && fapi.UI && fapi.UI.showPayment) {
+        console.info('[promti:buy] FAPI path selected → registering ok-payment-success / ok-payment-failed listeners');
         return new Promise((resolve) => {
           const handler = (e) => {
             window.removeEventListener('ok-payment-success', handler);
             window.removeEventListener('ok-payment-failed', failHandler);
+            console.info('[promti:buy] ok-payment-success received, detail=%o', e.detail);
             this.energy += ENERGY_IAP_AMOUNT;
+            console.info('[promti:buy] Energy +%d → new total=%d', ENERGY_IAP_AMOUNT, this.energy);
             this._saveProgress();
             this._updateStatsPanel();
             this.el.modalEnergyValue.textContent = this.energy;
@@ -1140,13 +1177,16 @@ class PromtiGame {
           const failHandler = (e) => {
             window.removeEventListener('ok-payment-success', handler);
             window.removeEventListener('ok-payment-failed', failHandler);
+            console.warn('[promti:buy] ok-payment-failed received, detail=%o', e.detail);
             resolve();
           };
           window.addEventListener('ok-payment-success', handler);
           window.addEventListener('ok-payment-failed', failHandler);
-
+          console.info('[promti:buy] Listeners registered, calling fapi.UI.showPayment(%s, ..., %s, %d, null, null, ok, true)',
+            iapName, iapId, iapPrice);
           try {
             fapi.UI.showPayment(iapName, '100 единиц энергии для игры', iapId, iapPrice, null, null, 'ok', 'true');
+            console.info('[promti:buy] fapi.UI.showPayment() called — waiting for callback');
           } catch (e) {
             console.warn('[promti] FAPI showPayment error:', e);
             resolve();
@@ -1155,15 +1195,19 @@ class PromtiGame {
       }
 
       // Fallback to OKSDK
+      console.info('[promti:buy] FAPI unavailable → falling back to OKSDK.Payments.show');
+      const oksdkPayload = {
+        name        : iapName,
+        description : '100 единиц энергии для игры',
+        code        : iapId,
+        price       : iapPrice,
+        uids        : '',
+      };
+      console.info('[promti:buy] OKSDK.Payments.show args: %o', oksdkPayload);
       return new Promise((resolve) => {
-        OKSDK.Payments.show({
-          name        : iapName,
-          description : '100 единиц энергии для игры',
-          code        : iapId,
-          price       : iapPrice,
-          uids        : '',
-        }, () => {
+        OKSDK.Payments.show(oksdkPayload, () => {
           this.energy += ENERGY_IAP_AMOUNT;
+          console.info('[promti:buy] OKSDK payment success → energy +%d, new total=%d', ENERGY_IAP_AMOUNT, this.energy);
           this._saveProgress();
           this._updateStatsPanel();
           this.el.modalEnergyValue.textContent = this.energy;
@@ -1173,11 +1217,14 @@ class PromtiGame {
           resolve();
         });
       });
+    } else {
+      console.info('[promti:buy] platform=%s → skipping OK payment path', this.platform);
     }
 
     // Final fallback for dev mode
     if (!this.vkBridgeReady && !this.okReady) {
       this.energy += ENERGY_IAP_AMOUNT;
+      console.info('[promti:buy] No platform detected (dev mode) → granting energy directly, new total=%d', this.energy);
       this._saveProgress();
       this._updateStatsPanel();
       this.el.modalEnergyValue.textContent = this.energy;
