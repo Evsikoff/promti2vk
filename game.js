@@ -1,5 +1,9 @@
 'use strict';
 
+// Global OK SDK callbacks must exist before SDK is invoked to avoid ReferenceError
+window.API_callback  = window.API_callback  || function() {};
+window.FAPI_callback = window.FAPI_callback || function() {};
+
 // ===== CONFIG =====
 const DEEPSEEK_API_KEY = 'sk-9bd0908d76194c21bb304fe259a4e7fc';
 const DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';
@@ -75,6 +79,11 @@ class PromtiGame {
 
     // Detect platform via URL params (most reliable signal)
     this._detectPlatform();
+
+    // Setup OK callbacks immediately if on OK platform
+    if (this.platform === 'ok') {
+      this._setupOKCallbacks();
+    }
 
     // Attempt to init VK Bridge first (unified launcher on OK often provides it)
     await Promise.race([
@@ -284,7 +293,7 @@ class PromtiGame {
       const apiConnection = params.get('apiconnection') || '';
 
       const initFAPI = () => {
-        if (typeof FAPI !== 'undefined') {
+        if (typeof FAPI !== 'undefined' && apiServer && apiConnection) {
           try {
             // Signature: FAPI.init(apiServer, apiConnection, onSuccess, onError)
             FAPI.init(apiServer, apiConnection, () => {
@@ -302,6 +311,9 @@ class PromtiGame {
             initOKSDK();
           }
         } else {
+          if (typeof FAPI !== 'undefined' && (!apiServer || !apiConnection)) {
+            console.warn('[promti] FAPI present but missing api_server or apiconnection params');
+          }
           initOKSDK();
         }
       };
