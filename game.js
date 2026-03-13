@@ -1212,115 +1212,19 @@ class PromtiGame {
           Number(fapiResult?.error?.error_code) === -1
           && String(fapiResult?.error?.error_message || '').includes('UI methods are available only for apps running on OK portal');
 
-        if (!unsupportedInVKContainer) {
+        if (!this.vkBridgeReady || !unsupportedInVKContainer) {
           return;
         }
 
-        console.info('[promti:buy] OK FAPI payment is not available in VK container → trying OKWebAppCallAPIMethod');
+        console.info('[promti:buy] OK FAPI payment is not available in VK container → falling back to VKWebAppShowOrderBox');
       }
 
-      if (this.vkBridgeReady) {
-        const okBridgeResult = await new Promise((resolve) => {
-          let settled = false;
-          const done = (result) => {
-            if (settled) return;
-            settled = true;
-            clearTimeout(timer);
-            window.removeEventListener('ok-payment-success', successHandler);
-            window.removeEventListener('ok-payment-failed', failHandler);
-            resolve(result);
-          };
-
-          const successHandler = (e) => {
-            console.info('[promti:buy] OK bridge callback success, detail=%o', e.detail);
-            this.energy += ENERGY_IAP_AMOUNT;
-            this._saveProgress();
-            this._updateStatsPanel();
-            this.el.modalEnergyValue.textContent = this.energy;
-            done({ paid: true, via: 'ok-bridge-callback' });
-          };
-
-          const failHandler = (e) => {
-            console.warn('[promti:buy] OK bridge callback failed, detail=%o', e.detail);
-            done({ paid: false, error: e.detail || null, via: 'ok-bridge-callback' });
-          };
-
-          const timer = setTimeout(() => {
-            console.warn('[promti:buy] OK bridge callback timeout');
-            done({ paid: false, timeout: true, via: 'ok-bridge-timeout' });
-          }, 12000);
-
-          window.addEventListener('ok-payment-success', successHandler);
-          window.addEventListener('ok-payment-failed', failHandler);
-
-          const calls = [
-            {
-              method: 'OKWebAppCallAPIMethod',
-              payload: {
-                method: 'showPayment',
-                params: [iapName, '100 единиц энергии для игры', iapId, iapPrice, null, null, 'ok', 'true']
-              }
-            },
-            {
-              method: 'OKWebAppCallAPIMethod',
-              payload: {
-                method: 'showPayment',
-                params: {
-                  name: iapName,
-                  description: '100 единиц энергии для игры',
-                  code: iapId,
-                  price: iapPrice,
-                }
-              }
-            },
-            {
-              method: 'VKWebAppCallAPIMethod',
-              payload: {
-                method: 'showPayment',
-                params: [iapName, '100 единиц энергии для игры', iapId, iapPrice, null, null, 'ok', 'true']
-              }
-            }
-          ];
-
-          (async () => {
-            for (const call of calls) {
-              if (settled) return;
-              try {
-                console.info('[promti:buy] Trying bridge API %s with payload=%o', call.method, call.payload);
-                const data = await this._bridge.send(call.method, call.payload);
-                console.info('[promti:buy] %s response: %o', call.method, data);
-              } catch (e) {
-                console.warn('[promti:buy] %s failed: %o', call.method, e);
-              }
-            }
-          })();
-        });
-
-        if (okBridgeResult.paid) {
-          return;
-        }
-
-        console.warn('[promti:buy] OK bridge payment attempts failed (%o) → trying VKWebAppShowOrderBox as last resort', okBridgeResult);
-        try {
-          const data = await this._bridge.send('VKWebAppShowOrderBox', {
-            type: 'item',
-            item: iapId
-          });
-          console.info('[promti:buy] VKWebAppShowOrderBox result in OK container: %o', data);
-          if (data.success) {
-            this.energy += ENERGY_IAP_AMOUNT;
-            this._saveProgress();
-            this._updateStatsPanel();
-            this.el.modalEnergyValue.textContent = this.energy;
-          }
-        } catch (e) {
-          console.warn('[promti:buy] VKWebAppShowOrderBox failed in OK container:', e);
-        }
+      if (!this.vkBridgeReady) {
+        console.warn('[promti:buy] No OK payment method found and VK bridge unavailable, aborting');
         return;
       }
 
-      console.warn('[promti:buy] No OK payment method found and VK bridge unavailable, aborting');
-      return;
+      console.info('[promti:buy] No usable OK payment method, VK bridge is ready → using VKWebAppShowOrderBox fallback');
     }
 
     // 2. Try VK Bridge if ready
