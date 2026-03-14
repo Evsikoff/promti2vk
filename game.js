@@ -501,16 +501,8 @@ class PromtiGame {
     }
 
     if (this.platform === 'ok') {
-      const label = promo ? '4 ОКов' : '8 ОКов';
-      if (promo) {
-        this.el.promoBadge.classList.remove('hidden');
-        this.el.discountBadge.textContent = `-${promo.discount}%`;
-        this.el.discountBadge.classList.remove('hidden');
-      } else {
-        this.el.promoBadge.classList.add('hidden');
-        this.el.discountBadge.classList.add('hidden');
-      }
-      this.el.btnEnergyBuy.textContent = `Купить 100 единиц энергии — ${label}`;
+      this.el.promoBadge.classList.add('hidden');
+      this.el.btnEnergyBuy.parentElement.classList.add('hidden');
       return;
     }
 
@@ -1294,57 +1286,7 @@ class PromtiGame {
 
   // ------------------------------------------------------------------ ADS
   async _showRewardedVideo(onReward, onNoReward) {
-    // 1. If OK platform — use OK-specific branch ONLY
-    if (this.platform === 'ok') {
-      // Use FAPI if available (standard for "Games in OK")
-      if (typeof FAPI !== 'undefined' && FAPI.UI && FAPI.UI.showRewardedVideo) {
-        const handler = (e) => {
-          window.removeEventListener('ok-ads-rewarded', handler);
-          window.removeEventListener('ok-ads-failed', failHandler);
-          if (onReward) onReward();
-        };
-        const failHandler = (e) => {
-          window.removeEventListener('ok-ads-rewarded', handler);
-          window.removeEventListener('ok-ads-failed', failHandler);
-          if (onNoReward) onNoReward();
-        };
-        window.addEventListener('ok-ads-rewarded', handler);
-        window.addEventListener('ok-ads-failed', failHandler);
-
-        try {
-          FAPI.UI.showRewardedVideo();
-        } catch (e) {
-          console.warn('[promti] FAPI showRewardedVideo error:', e);
-          if (onNoReward) onNoReward();
-        }
-        return;
-      }
-
-      // Fallback to OKSDK
-      try {
-        OKSDK.Ads.load({ format: 'reward' }, (adId) => {
-          try {
-            OKSDK.Ads.show(adId, () => {
-              if (onReward) onReward();
-            }, () => {
-              if (onNoReward) onNoReward();
-            });
-          } catch (e) {
-            console.warn('[promti] OK Ads.show error:', e);
-            if (onNoReward) onNoReward();
-          }
-        }, () => {
-          console.warn('[promti] No OK rewarded ad available');
-          if (onNoReward) onNoReward();
-        });
-      } catch (e) {
-        console.warn('[promti] OK Ads.load error:', e);
-        if (onNoReward) onNoReward();
-      }
-      return;
-    }
-
-    // 2. Try VK Bridge if ready
+    // 1. Try VK Bridge if ready
     if (this.vkBridgeReady) {
       try {
         const checkData = await this._bridge.send('VKWebAppCheckNativeAds', { ad_format: 'reward' });
@@ -1387,49 +1329,7 @@ class PromtiGame {
   }
 
   async _showFullscreenAd(callback) {
-    // 1. If OK platform — use OK-specific branch ONLY
-    if (this.platform === 'ok') {
-      // Use FAPI if available
-      if (typeof FAPI !== 'undefined' && FAPI.UI && FAPI.UI.showAd) {
-        const handler = (e) => {
-          window.removeEventListener('ok-ads-completed', handler);
-          if (callback) callback();
-        };
-        window.addEventListener('ok-ads-completed', handler);
-
-        try {
-          FAPI.UI.showAd();
-        } catch (e) {
-          console.warn('[promti] FAPI showAd error:', e);
-          if (callback) callback();
-        }
-        return;
-      }
-
-      // Fallback to OKSDK
-      try {
-        OKSDK.Ads.load({ format: 'interstitial' }, (adId) => {
-          try {
-            OKSDK.Ads.show(adId, () => {
-              if (callback) callback();
-            }, () => {
-              if (callback) callback();
-            });
-          } catch (e) {
-            console.warn('[promti] OK interstitial show error:', e);
-            if (callback) callback();
-          }
-        }, () => {
-          if (callback) callback();
-        });
-      } catch (e) {
-        console.warn('[promti] OK interstitial load error:', e);
-        if (callback) callback();
-      }
-      return;
-    }
-
-    // 2. Try VK Bridge if ready
+    // 1. Try VK Bridge if ready
     if (this.vkBridgeReady) {
       try {
         await this._bridge.send('VKWebAppShowNativeAds', { ad_format: 'interstitial' });
@@ -1440,8 +1340,8 @@ class PromtiGame {
       }
     }
 
-    // Final fallback for dev mode
-    if (!this.vkBridgeReady && !this.okReady) {
+    // Final fallback for dev mode or OK without VK Bridge
+    if (!this.vkBridgeReady) {
       if (callback) callback();
     }
   }
