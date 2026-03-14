@@ -145,6 +145,14 @@ img {
   font-weight: 900;
   letter-spacing: 0.03em;
   padding: 8px 0 4px;
+  transition: text-align 0.2s, padding-right 0.2s;
+}
+
+/* На мобильном в портретном режиме VK перекрывает правую часть заголовка
+   своими элементами управления — сдвигаем заголовок влево */
+body.mobile-portrait #main-title {
+  text-align: left;
+  padding-right: 90px;
 }
 
 #level-indicator {

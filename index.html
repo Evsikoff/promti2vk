@@ -26,6 +26,17 @@
   <script src="https://api.ok.ru/js/sdk.js"></script>
 
   <script>
+    // ── Mobile portrait detection — смещаем заголовок влево под кнопки VK ──
+    function updateMobilePortrait() {
+      const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
+        || (window.screen.width <= 480 && 'ontouchstart' in window);
+      const isPortrait = window.innerHeight > window.innerWidth;
+      document.body.classList.toggle('mobile-portrait', isMobile && isPortrait);
+    }
+    updateMobilePortrait();
+    window.addEventListener('resize', updateMobilePortrait);
+    window.addEventListener('orientationchange', updateMobilePortrait);
+
     // ── Block context menu (right-click + long-tap on mobile) ──
     document.addEventListener('contextmenu', e => e.preventDefault());
 
