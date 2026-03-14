@@ -229,8 +229,11 @@ class PromtiGame {
     this._bridge.subscribe((e) => {
       if (e.detail.type === 'VKWebAppUpdateConfig') {
         const h = e.detail.data.viewport_height;
-        if (h && h > 0) {
-          this.el.appContainer.style.height = h + 'px';
+        // On mobile, the frame fills the viewport. On desktop, we manage height via ResizeWindow.
+        // We only set explicit height if we are NOT on desktop (or if it's mobile web).
+        const isDesktop = !(/Android|iPhone|iPad|iPod/i.test(navigator.userAgent));
+        if (h && h > 0 && !isDesktop) {
+          this.el.appContainer.style.minHeight = h + 'px';
         }
       }
     });
@@ -566,6 +569,7 @@ class PromtiGame {
     this._renderStartScreen();
     this.el.startScreen.classList.remove('hidden');
     this.el.gameContainer.classList.add('hidden');
+    this._updateHeight();
   }
 
   _renderStartScreen() {
@@ -646,6 +650,7 @@ class PromtiGame {
     this.el.startScreen.classList.add('hidden');
     this.el.gameContainer.classList.remove('hidden');
     this._loadPhrase(phrase);
+    this._scrollToTop();
   }
 
   _loadPhrase(phrase) {
@@ -692,6 +697,7 @@ class PromtiGame {
     this.el.btnCancelSel.classList.add('hidden');
 
     this._updateSendBtn();
+    this._updateHeight();
   }
 
   // ------------------------------------------------------------------ FORBIDDEN WORDS
@@ -792,6 +798,7 @@ class PromtiGame {
     this._renderForbiddenWords();
     this._saveProgress();
     this._updateSendBtn();
+    this._updateHeight();
   }
 
   // ------------------------------------------------------------------ VALIDATION
@@ -856,6 +863,7 @@ class PromtiGame {
           <div class="spinner-dot"></div>
         </div>
       </div>`;
+    this._updateHeight();
 
     try {
       const res = await fetch(DEEPSEEK_API_URL, {
@@ -903,6 +911,7 @@ class PromtiGame {
       const phraseFound = this._checkPhraseInResponse(answer);
       this._showResponse(answer, reasoning, phraseFound);
       this._showResultButtons(phraseFound);
+      this._updateHeight();
 
     } catch (err) {
       // Allow retry on network error
@@ -911,6 +920,7 @@ class PromtiGame {
       this._updateSendBtn();
       this.el.responseBox.textContent =
         `Ошибка запроса: ${err.message}.\nПроверьте соединение и попробуйте снова.`;
+      this._updateHeight();
     }
   }
 
@@ -958,6 +968,7 @@ class PromtiGame {
     if (phraseFound) {
       this._highlightPhraseInDOM(this.el.responseBox.querySelector('.response-answer'));
     }
+    this._updateHeight();
   }
 
   // Highlight each word of the target phrase in the DOM
@@ -1028,6 +1039,7 @@ class PromtiGame {
       this.el.resultBtns.classList.add('hidden');
       this.el.btnSkip.classList.add('hidden');
       this._updateSendBtn();
+      this._updateHeight();
     });
   }
 
@@ -1434,6 +1446,30 @@ class PromtiGame {
     this.el.resultBtns.classList.add('hidden');
     this.el.btnSend.disabled = true;
     this.el.promptTextarea.disabled = true;
+    this._updateHeight();
+  }
+
+  // ------------------------------------------------------------------ IFRAME RESIZING
+  _updateHeight() {
+    if (this.platform !== 'vk' || !this.vkBridgeReady) return;
+
+    // Use requestAnimationFrame to ensure DOM is updated
+    requestAnimationFrame(() => {
+      const contentHeight = document.documentElement.scrollHeight;
+      // VK limit: min 600px, max 4050px
+      const targetHeight = Math.min(Math.max(contentHeight, 600), 4050);
+
+      console.info('[promti] Updating height:', targetHeight);
+      this._bridge.send('VKWebAppResizeWindow', {
+        width: 800,
+        height: targetHeight
+      });
+    });
+  }
+
+  _scrollToTop() {
+    if (this.platform !== 'vk' || !this.vkBridgeReady) return;
+    this._bridge.send('VKWebAppScroll', { top: 0, speed: 0 });
   }
 }
 
