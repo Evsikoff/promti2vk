@@ -112,6 +112,8 @@ img {
 #app-container {
   width: 100%;
   max-width: 680px;
+  /* On Desktop VK, the height is determined by the content.
+     On Mobile, we want it to fill the viewport. */
   min-height: 100vh;
   display: flex;
   flex-direction: column;
@@ -119,6 +121,9 @@ img {
   gap: 18px;
   padding: 20px 12px 40px;
   margin: 0 auto;
+  box-sizing: border-box;
+  /* Ensure container doesn't collapse or hide content during measurement */
+  overflow: visible;
 }
 
 /* ===== SCREENS (start + game) ===== */
