@@ -152,7 +152,7 @@ img {
    своими элементами управления — сдвигаем заголовок влево */
 body.mobile-portrait #main-title {
   text-align: left;
-  padding-right: 90px;
+  padding-right: 120px;
 }
 
 #level-indicator {

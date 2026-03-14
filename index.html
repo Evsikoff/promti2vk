@@ -29,11 +29,11 @@
     // ── Mobile portrait detection — смещаем заголовок влево под кнопки VK ──
     function updateMobilePortrait() {
       const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
-        || (window.screen.width <= 480 && 'ontouchstart' in window);
+        || ('ontouchstart' in window && window.screen.width <= 600);
       const isPortrait = window.innerHeight > window.innerWidth;
       document.body.classList.toggle('mobile-portrait', isMobile && isPortrait);
     }
-    updateMobilePortrait();
+    document.addEventListener('DOMContentLoaded', updateMobilePortrait);
     window.addEventListener('resize', updateMobilePortrait);
     window.addEventListener('orientationchange', updateMobilePortrait);
 
