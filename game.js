@@ -25,6 +25,7 @@ class PromtiGame {
 
     // Platform: null (web/dev), 'vk', or 'ok'
     this.platform      = null;
+    this.isMobile      = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
     // Data loaded from JSON files
     this.phrases       = [];  // from phrases.json
@@ -102,9 +103,26 @@ class PromtiGame {
     // Show start screen
     this._showStartScreen();
 
+    // Setup ResizeObserver for auto-scaling height (Desktop VK)
+    this._setupResizeObserver();
+
     // Reveal the game — fade out loading overlay
     console.info('[promti] Game initialized, hiding overlay');
     this.el.loadingOverlay.classList.add('hidden');
+  }
+
+  _setupResizeObserver() {
+    if (this.platform !== 'vk') return;
+
+    try {
+      this._ro = new ResizeObserver(() => {
+        this._updateHeight();
+      });
+      // Observe the main container
+      this._ro.observe(this.el.appContainer);
+    } catch (e) {
+      console.warn('[promti] ResizeObserver not supported or failed:', e);
+    }
   }
 
   _cacheElements() {
@@ -230,9 +248,8 @@ class PromtiGame {
       if (e.detail.type === 'VKWebAppUpdateConfig') {
         const h = e.detail.data.viewport_height;
         // On mobile, the frame fills the viewport. On desktop, we manage height via ResizeWindow.
-        // We only set explicit height if we are NOT on desktop (or if it's mobile web).
-        const isDesktop = !(/Android|iPhone|iPad|iPod/i.test(navigator.userAgent));
-        if (h && h > 0 && !isDesktop) {
+        // We only set explicit height if we are on mobile (or if it's mobile web).
+        if (h && h > 0 && this.isMobile) {
           this.el.appContainer.style.minHeight = h + 'px';
         }
       }
@@ -1451,18 +1468,50 @@ class PromtiGame {
 
   // ------------------------------------------------------------------ IFRAME RESIZING
   _updateHeight() {
-    if (this.platform !== 'vk' || !this.vkBridgeReady) return;
+    // Only for VK Desktop
+    if (this.platform !== 'vk' || !this.vkBridgeReady || this.isMobile) return;
 
-    // Use requestAnimationFrame to ensure DOM is updated
+    // Trailing-edge throttle to ensure we capture the final layout state
+    if (this._heightThrottleTimeout) return;
+
+    this._heightThrottleTimeout = setTimeout(() => {
+      this._heightThrottleTimeout = null;
+      this._doUpdateHeight();
+    }, 100);
+  }
+
+  _doUpdateHeight() {
+    // Use double requestAnimationFrame to ensure layout is truly stable
     requestAnimationFrame(() => {
-      const contentHeight = document.documentElement.scrollHeight;
-      // VK limit: min 600px, max 4050px
-      const targetHeight = Math.min(Math.max(contentHeight, 600), 4050);
+      requestAnimationFrame(() => {
+        const body = document.body;
+        const html = document.documentElement;
 
-      console.info('[promti] Updating height:', targetHeight);
-      this._bridge.send('VKWebAppResizeWindow', {
-        width: 800,
-        height: targetHeight
+        // Measure multiple values to find the most accurate content height
+        const heights = {
+          bodyScroll: body.scrollHeight,
+          bodyOffset: body.offsetHeight,
+          htmlClient: html.clientHeight,
+          htmlScroll: html.scrollHeight,
+          htmlOffset: html.offsetHeight,
+          containerOffset: this.el.appContainer.offsetHeight
+        };
+        const height = Math.max(...Object.values(heights));
+
+        // VK limit: min 600px, max 4050px
+        const targetHeight = Math.min(Math.max(height, 600), 4050);
+
+        // Only send if height actually changed significantly (avoid jitter)
+        if (Math.abs((this._currentSentHeight || 0) - targetHeight) < 2) return;
+
+        console.info('[promti] ResizeWindow trigger:', heights);
+        console.info(`[promti] ResizeWindow: measured=${height}px, target=${targetHeight}px`);
+        this._currentSentHeight = targetHeight;
+
+        this._bridge.send('VKWebAppResizeWindow', {
+          width: 800,
+          height: targetHeight
+        });
       });
     });
   }
