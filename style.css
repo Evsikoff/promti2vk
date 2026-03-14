@@ -10,9 +10,10 @@
    our own scrollable container (#app-container) instead. */
 html,
 body {
-  height: 100%;
-  overflow: hidden;
-  overscroll-behavior: none;
+  height: auto;
+  overflow-x: hidden;
+  margin: 0;
+  padding: 0;
 }
 
 body {
@@ -111,22 +112,13 @@ img {
 #app-container {
   width: 100%;
   max-width: 680px;
-  /* Height is set by JS from VKWebAppUpdateConfig.viewport_height — the real
-     visible browser viewport — so scrolling inside the container always works
-     regardless of how tall VK makes the iframe.
-     Fallback 100vh is overridden as soon as VK sends the first config event. */
-  height: 100vh;
-  overflow-y: auto;
-  overflow-x: hidden;
-  /* Prevents pull-to-refresh and overscroll glow without blocking inner scroll */
-  overscroll-behavior: contain;
-  /* Smooth momentum scrolling on iOS */
-  -webkit-overflow-scrolling: touch;
+  min-height: 100vh;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 18px;
   padding: 20px 12px 40px;
+  margin: 0 auto;
 }
 
 /* ===== SCREENS (start + game) ===== */
