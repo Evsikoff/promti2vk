@@ -212,8 +212,7 @@ class PromtiGame {
       vkPlatform.endsWith('_ok') ||
       params.has('vk_ok_app_id') ||
       apiServer.includes('ok.ru') ||
-      (typeof FAPI !== 'undefined') ||
-      params.has('api_id') // common for OK
+      (typeof FAPI !== 'undefined')
     ) {
       this.platform = 'ok';
       console.info('[promti] Odnoklassniki platform detected');
